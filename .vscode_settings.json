@@ -1,0 +1,7 @@
+{
+    "python.analysis.extraPaths": ["./venv/Lib/site-packages"],
+    "python.autoComplete.extraPaths": ["./venv/Lib/site-packages"],
+    "python.analysis.autoSearchPaths": true,
+    "python.defaultInterpreterPath": "./venv/Scripts/python.exe",
+    "python.terminal.activateEnvironment": true
+}

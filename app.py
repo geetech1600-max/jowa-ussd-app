@@ -1,17 +1,17 @@
 from flask import Flask, request, jsonify
-import psycopg2 # type: ignore
+import psycopg2
 import os
 import json
 from datetime import datetime
+from urllib.parse import urlparse
+import re
 
 app = Flask(__name__)
 
-# Database configuration - will be set via environment variables
+# Database configuration
 def get_db_config():
-    # If DATABASE_URL is provided (common in hosting platforms)
     if os.environ.get('DATABASE_URL'):
         try:
-            from urllib.parse import urlparse
             url = urlparse(os.environ.get('DATABASE_URL'))
             return {
                 'dbname': url.path[1:],
@@ -23,7 +23,6 @@ def get_db_config():
         except:
             pass
     
-    # Fallback to individual environment variables
     return {
         'dbname': os.environ.get('DB_NAME', 'postgres'),
         'user': os.environ.get('DB_USER', 'postgres'),
@@ -39,65 +38,6 @@ def get_db_connection():
     except Exception as e:
         print(f"Database connection error: {e}")
         return None
-    
-    @app.route('/test-db')
-
-def test_db_connection():
-    """Test database connection"""
-    try:
-        conn = get_db_connection()
-        if conn:
-            cur = conn.cursor()
-            cur.execute('SELECT version();')
-            version = cur.fetchone()
-            cur.close()
-            conn.close()
-            return f"✅ Database connected: {version[0]}"
-        else:
-            return "❌ Database connection failed"
-    except Exception as e:
-        return f"❌ Error: {str(e)}"
-
-@app.route('/health')
-def health_check():
-    """Health check endpoint"""
-    try:
-        conn = get_db_connection()
-        if not conn:
-            return jsonify({'status': 'error', 'message': 'Database connection failed'}), 500
-        
-        cur = conn.cursor()
-        
-        # Check if tables exist
-        tables = ['users', 'employers', 'jobs', 'applications', 'ussd_sessions']
-        existing_tables = []
-        
-        for table in tables:
-            cur.execute("""
-                SELECT EXISTS (
-                    SELECT FROM information_schema.tables 
-                    WHERE table_name = %s
-                );
-            """, (table,))
-            exists = cur.fetchone()[0]
-            existing_tables.append({'table': table, 'exists': exists})
-        
-        cur.close()
-        conn.close()
-        
-        return jsonify({
-            'status': 'healthy',
-            'database': 'connected',
-            'tables': existing_tables,
-            'timestamp': datetime.now().isoformat()
-        })
-        
-    except Exception as e:
-        return jsonify({'status': 'error', 'message': str(e)}), 500
-
-@app.route('/')
-def home():
-    return "Jowa USSD App is running! Available endpoints: /health, /test-db, /ussd"
 
 # USSD Response Format
 def ussd_response(text, session_id, continue_session=True):
@@ -108,14 +48,31 @@ def ussd_response(text, session_id, continue_session=True):
         "type": response_type
     }
 
+# Input validation
+def validate_phone_number(phone):
+    pattern = r'^\+260(9|7)[0-9]{8}$'
+    return bool(re.match(pattern, phone))
+
+def validate_payment_amount(amount):
+    try:
+        return float(amount) > 0
+    except:
+        return False
+
 # Main USSD Handler
 @app.route('/ussd', methods=['POST'])
 def ussd_handler():
     try:
-        # Get USSD parameters
-        session_id = request.json.get('sessionId')
-        phone_number = request.json.get('phoneNumber')
-        text = request.json.get('text', '')
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No JSON data provided"}), 400
+            
+        session_id = data.get('sessionId')
+        phone_number = data.get('phoneNumber')
+        text = data.get('text', '')
+        
+        if not validate_phone_number(phone_number):
+            return jsonify(ussd_response("Invalid phone number format.", session_id, False))
         
         print(f"USSD Request: {session_id}, {phone_number}, {text}")
         
@@ -132,13 +89,14 @@ def ussd_handler():
         return jsonify(ussd_response("Sorry, an error occurred. Please try again.", session_id, False))
 
 def welcome_menu(session_id, phone_number):
-    welcome_text = """Welcome to JOWA - Find Work in Zambia!
-    
+    welcome_text = """Welcome to JOWA - Find Work in Zambia! 🇿🇲
+
 1. Looking for Work
 2. Post a Job
 3. About Jowa
-    
-Reply with 1, 2, or 3"""
+4. Contact Support
+
+Reply with 1, 2, 3, or 4"""
     
     # Initialize session
     conn = get_db_connection()
@@ -198,6 +156,8 @@ def process_input(session_id, phone_number, text):
         response = handle_post_job(session_id, phone_number, text, cur, conn, data)
     elif menu_level == 'browse_jobs':
         response = handle_browse_jobs(session_id, phone_number, text, cur, conn, data)
+    elif menu_level == 'view_applications':
+        response = handle_view_applications(session_id, phone_number, text, cur, conn, data)
     else:
         response = ussd_response("Invalid option. Please dial *123# to start again.", session_id, False)
     
@@ -216,7 +176,7 @@ def handle_main_menu(session_id, phone_number, text, cur, conn):
             return job_seeker_dashboard(session_id, phone_number, cur)
         else:
             update_session(cur, conn, session_id, 'job_seeker_registration', {'step': 1})
-            return ussd_response("Please enter your full name:", session_id)
+            return ussd_response("Welcome! Let's set up your profile.\n\nEnter your full name:", session_id)
     
     elif text == '2':
         # Employer path
@@ -228,45 +188,64 @@ def handle_main_menu(session_id, phone_number, text, cur, conn):
             return employer_dashboard(session_id, phone_number, cur)
         else:
             update_session(cur, conn, session_id, 'employer_registration', {'step': 1})
-            return ussd_response("Please enter your company/business name:", session_id)
+            return ussd_response("Welcome Employer! Let's register your business.\n\nEnter your company name:", session_id)
     
     elif text == '3':
-        about_text = """JOWA - Find Work Zambia
+        about_text = """About JOWA 🇿🇲
 
-Jowa connects job seekers with employers for informal jobs. No internet needed!
+Connecting job seekers with employers across Zambia. No internet needed!
 
-Features:
-• Find daily work
-• Post job opportunities
-• Free to use
+• Find daily work opportunities
+• Post jobs for free
 • Simple USSD interface
+• Trusted by Zambians
 
-Dial *123# to get started!"""
+For support: +260960000000"""
         return ussd_response(about_text, session_id, False)
     
+    elif text == '4':
+        support_text = """Contact Support:
+
+Call: +260960000000
+Email: support@jowa.co.zm
+
+Our team is here to help you with any issues using Jowa.
+
+Thank you for using Jowa!"""
+        return ussd_response(support_text, session_id, False)
+    
     else:
-        return ussd_response("Invalid option. Please reply with 1, 2, or 3", session_id)
+        return ussd_response("Invalid option. Please reply with 1, 2, 3, or 4", session_id)
 
 def handle_job_seeker_registration(session_id, phone_number, text, cur, conn, data):
     step = data.get('step', 1)
     
     if step == 1:
         # Save name and ask for skills
-        data['full_name'] = text
+        if len(text.strip()) < 2:
+            return ussd_response("Please enter a valid full name:", session_id)
+        
+        data['full_name'] = text.strip()
         data['step'] = 2
         update_session(cur, conn, session_id, 'job_seeker_registration', data)
-        return ussd_response("Enter your skills (e.g., Gardening, Cleaning, Construction):", session_id)
+        return ussd_response("Enter your skills (e.g., Construction, Farming, Cleaning):", session_id)
     
     elif step == 2:
         # Save skills and ask for location
-        data['skills'] = text
+        if len(text.strip()) < 2:
+            return ussd_response("Please enter your skills:", session_id)
+        
+        data['skills'] = text.strip()
         data['step'] = 3
         update_session(cur, conn, session_id, 'job_seeker_registration', data)
         return ussd_response("Enter your location/town:", session_id)
     
     elif step == 3:
         # Save location and complete registration
-        data['location'] = text
+        if len(text.strip()) < 2:
+            return ussd_response("Please enter your location:", session_id)
+        
+        data['location'] = text.strip()
         
         # Save to database
         cur.execute("""
@@ -286,7 +265,7 @@ def job_seeker_dashboard(session_id, phone_number, cur):
     
     name = user[0] if user else "User"
     
-    dashboard_text = f"""Welcome {name}!
+    dashboard_text = f"""Welcome {name}! 👷
 
 1. Browse Available Jobs
 2. My Applications
@@ -303,11 +282,12 @@ def handle_job_seeker_dashboard(session_id, phone_number, text, cur, conn, data)
         return browse_jobs(session_id, phone_number, cur, 0)
     
     elif text == '2':
-        return show_my_applications(session_id, phone_number, cur)
+        update_session(cur, conn, session_id, 'view_applications', {'page': 0})
+        return show_my_applications(session_id, phone_number, cur, 0)
     
     elif text == '3':
         update_session(cur, conn, session_id, 'job_seeker_registration', {'step': 1})
-        return ussd_response("Enter your full name:", session_id)
+        return ussd_response("Update your profile:\n\nEnter your full name:", session_id)
     
     elif text == '4':
         update_session(cur, conn, session_id, 'main_menu', {})
@@ -330,16 +310,16 @@ def browse_jobs(session_id, phone_number, cur, page):
     jobs = cur.fetchall()
     
     if not jobs:
-        return ussd_response("No jobs available at the moment. Check back later!", session_id)
+        return ussd_response("No jobs available at the moment. Check back later! 😊", session_id, False)
     
     response_text = "Available Jobs:\n\n"
     for i, job in enumerate(jobs, 1):
         job_id, title, location, amount, payment_type, company = job
         response_text += f"{i}. {title}\n"
-        response_text += f"   {location} - {company}\n"
-        response_text += f"   K{amount}/{payment_type}\n\n"
+        response_text += f"   📍 {location} - {company}\n"
+        response_text += f"   💰 K{amount}/{payment_type}\n\n"
     
-    response_text += "4. Next Page\n5. Previous Page\n6. Back"
+    response_text += "4. Next Page\n5. Back to Menu\n0. Main Menu"
     
     return ussd_response(response_text, session_id)
 
@@ -352,7 +332,7 @@ def handle_browse_jobs(session_id, phone_number, text, cur, conn, data):
             # Apply for job
             offset = page * 3
             cur.execute("""
-                SELECT j.id FROM jobs j
+                SELECT j.id, j.title FROM jobs j
                 WHERE j.status = 'active'
                 ORDER BY j.created_at DESC
                 LIMIT 3 OFFSET %s
@@ -360,7 +340,7 @@ def handle_browse_jobs(session_id, phone_number, text, cur, conn, data):
             
             jobs = cur.fetchall()
             if choice <= len(jobs):
-                job_id = jobs[choice-1][0]
+                job_id, job_title = jobs[choice-1]
                 
                 # Get user ID
                 cur.execute("SELECT id FROM users WHERE phone_number = %s", (phone_number,))
@@ -379,8 +359,19 @@ def handle_browse_jobs(session_id, phone_number, text, cur, conn, data):
                         VALUES (%s, %s, 'pending')
                     """, (job_id, user_id))
                     conn.commit()
+                    
+                    # Get employer phone to notify
+                    cur.execute("""
+                        SELECT e.phone_number FROM employers e
+                        JOIN jobs j ON j.employer_id = e.id
+                        WHERE j.id = %s
+                    """, (job_id,))
+                    employer_phone = cur.fetchone()[0]
+                    
+                    # Notify employer (in real app, you'd send SMS)
+                    print(f"📱 Application alert! User {phone_number} applied for job {job_title}. Employer: {employer_phone}")
                 
-                return ussd_response("Application submitted! Employer will contact you.", session_id, False)
+                return ussd_response(f"✅ Application submitted for: {job_title}\n\nEmployer will contact you soon! 📞", session_id, False)
         
         elif choice == 4:
             # Next page
@@ -390,34 +381,90 @@ def handle_browse_jobs(session_id, phone_number, text, cur, conn, data):
             return browse_jobs(session_id, phone_number, cur, page)
         
         elif choice == 5:
-            # Previous page
-            if page > 0:
-                page -= 1
-                data['page'] = page
-                update_session(cur, conn, session_id, 'browse_jobs', data)
-                return browse_jobs(session_id, phone_number, cur, page)
-            else:
-                return ussd_response("You're on the first page.", session_id)
-        
-        elif choice == 6:
             update_session(cur, conn, session_id, 'job_seeker_dashboard', {})
             return job_seeker_dashboard(session_id, phone_number, cur)
+        
+        elif choice == 0:
+            update_session(cur, conn, session_id, 'main_menu', {})
+            return welcome_menu(session_id, phone_number)
     
     return ussd_response("Invalid option. Please try again.", session_id)
+
+def show_my_applications(session_id, phone_number, cur, page):
+    offset = page * 5
+    cur.execute("""
+        SELECT j.title, e.company_name, a.status, a.applied_at
+        FROM applications a
+        JOIN jobs j ON a.job_id = j.id
+        JOIN employers e ON j.employer_id = e.id
+        JOIN users u ON a.user_id = u.id
+        WHERE u.phone_number = %s
+        ORDER BY a.applied_at DESC
+        LIMIT 5 OFFSET %s
+    """, (phone_number, offset))
+    
+    applications = cur.fetchall()
+    
+    if not applications:
+        return ussd_response("You haven't applied to any jobs yet.\n\nBrowse jobs to get started! 💼", session_id, False)
+    
+    response_text = "Your Applications:\n\n"
+    for i, app in enumerate(applications, 1):
+        title, company, status, applied_at = app
+        status_icon = "✅" if status == 'approved' else "⏳" if status == 'pending' else "❌"
+        response_text += f"{i}. {title}\n"
+        response_text += f"   🏢 {company}\n"
+        response_text += f"   {status_icon} {status.capitalize()}\n"
+        response_text += f"   📅 {applied_at.strftime('%d/%m/%Y')}\n\n"
+    
+    response_text += "6. Next Page\n7. Previous Page\n0. Main Menu"
+    
+    return ussd_response(response_text, session_id)
+
+def handle_view_applications(session_id, phone_number, text, cur, conn, data):
+    page = data.get('page', 0)
+    
+    if text == '6':
+        page += 1
+        data['page'] = page
+        update_session(cur, conn, session_id, 'view_applications', data)
+        return show_my_applications(session_id, phone_number, cur, page)
+    
+    elif text == '7':
+        if page > 0:
+            page -= 1
+            data['page'] = page
+            update_session(cur, conn, session_id, 'view_applications', data)
+            return show_my_applications(session_id, phone_number, cur, page)
+        else:
+            return ussd_response("You're on the first page.", session_id)
+    
+    elif text == '0':
+        update_session(cur, conn, session_id, 'main_menu', {})
+        return welcome_menu(session_id, phone_number)
+    
+    else:
+        return ussd_response("Invalid option. Please try again.", session_id)
 
 def handle_employer_registration(session_id, phone_number, text, cur, conn, data):
     step = data.get('step', 1)
     
     if step == 1:
         # Save company name and ask for business type
-        data['company_name'] = text
+        if len(text.strip()) < 2:
+            return ussd_response("Please enter a valid company name:", session_id)
+        
+        data['company_name'] = text.strip()
         data['step'] = 2
         update_session(cur, conn, session_id, 'employer_registration', data)
-        return ussd_response("Enter your business type (e.g., Construction, Farming, Retail):", session_id)
+        return ussd_response("Enter your business type (e.g., Construction, Retail, Farming):", session_id)
     
     elif step == 2:
         # Save business type and complete registration
-        data['business_type'] = text
+        if len(text.strip()) < 2:
+            return ussd_response("Please enter your business type:", session_id)
+        
+        data['business_type'] = text.strip()
         
         # Save to database
         cur.execute("""
@@ -440,7 +487,7 @@ def employer_dashboard(session_id, phone_number, cur):
     
     company_name = employer[0] if employer else "Employer"
     
-    dashboard_text = f"""Welcome {company_name}!
+    dashboard_text = f"""Welcome {company_name}! 🏢
 
 1. Post New Job
 2. View My Jobs
@@ -454,7 +501,7 @@ Reply with 1, 2, 3, or 4"""
 def handle_employer_dashboard(session_id, phone_number, text, cur, conn, data):
     if text == '1':
         update_session(cur, conn, session_id, 'post_job', {'step': 1})
-        return ussd_response("Enter job title:", session_id)
+        return ussd_response("Let's post a new job! 💼\n\nEnter job title:", session_id)
     
     elif text == '2':
         return show_employer_jobs(session_id, phone_number, cur)
@@ -491,13 +538,22 @@ def handle_post_job(session_id, phone_number, text, cur, conn, data):
         return ussd_response("Enter payment amount (e.g., 50):", session_id)
     
     elif step == 4:
+        if not validate_payment_amount(text):
+            return ussd_response("Please enter a valid payment amount (e.g., 50):", session_id)
+        
         data['payment_amount'] = text
         data['step'] = 5
         update_session(cur, conn, session_id, 'post_job', data)
-        return ussd_response("Enter payment type (hourly/daily/project):", session_id)
+        return ussd_response("Enter payment type:\n1. Hourly\n2. Daily\n3. Project\n\nReply 1, 2, or 3", session_id)
     
     elif step == 5:
-        data['payment_type'] = text
+        payment_types = {'1': 'hourly', '2': 'daily', '3': 'project'}
+        payment_type = payment_types.get(text)
+        
+        if not payment_type:
+            return ussd_response("Invalid choice. Enter payment type:\n1. Hourly\n2. Daily\n3. Project", session_id)
+        
+        data['payment_type'] = payment_type
         
         # Get employer ID
         cur.execute("SELECT id FROM employers WHERE phone_number = %s", (phone_number,))
@@ -513,38 +569,7 @@ def handle_post_job(session_id, phone_number, text, cur, conn, data):
         conn.commit()
         
         update_session(cur, conn, session_id, 'employer_dashboard', {})
-        return ussd_response("Job posted successfully! Job seekers can now apply.", session_id, False)
-
-def update_session(cur, conn, session_id, menu_level, data):
-    cur.execute("""
-        UPDATE ussd_sessions 
-        SET menu_level = %s, data = %s, updated_at = CURRENT_TIMESTAMP
-        WHERE session_id = %s
-    """, (menu_level, json.dumps(data), session_id))
-    conn.commit()
-
-def show_my_applications(session_id, phone_number, cur):
-    cur.execute("""
-        SELECT j.title, a.status, a.applied_at
-        FROM applications a
-        JOIN jobs j ON a.job_id = j.id
-        JOIN users u ON a.user_id = u.id
-        WHERE u.phone_number = %s
-        ORDER BY a.applied_at DESC
-        LIMIT 5
-    """, (phone_number,))
-    
-    applications = cur.fetchall()
-    
-    if not applications:
-        return ussd_response("You haven't applied to any jobs yet.", session_id, False)
-    
-    response_text = "Your Applications:\n\n"
-    for app in applications:
-        title, status, applied_at = app
-        response_text += f"- {title}\n  Status: {status}\n  Applied: {applied_at.strftime('%d/%m/%Y')}\n\n"
-    
-    return ussd_response(response_text, session_id, False)
+        return ussd_response("✅ Job posted successfully!\n\nJob seekers can now apply for your position. 📱", session_id, False)
 
 def show_employer_jobs(session_id, phone_number, cur):
     cur.execute("""
@@ -560,18 +585,21 @@ def show_employer_jobs(session_id, phone_number, cur):
     jobs = cur.fetchall()
     
     if not jobs:
-        return ussd_response("You haven't posted any jobs yet.", session_id, False)
+        return ussd_response("You haven't posted any jobs yet.\n\nPost a job to find workers! 💼", session_id, False)
     
     response_text = "Your Jobs:\n\n"
     for job in jobs:
         title, status, applications = job
-        response_text += f"- {title}\n  Status: {status}\n  Applications: {applications}\n\n"
+        status_icon = "🟢" if status == 'active' else "🔴"
+        response_text += f"• {title}\n"
+        response_text += f"  {status_icon} {status.capitalize()}\n"
+        response_text += f"  📥 {applications} applications\n\n"
     
     return ussd_response(response_text, session_id, False)
 
 def show_job_applications(session_id, phone_number, cur):
     cur.execute("""
-        SELECT u.full_name, j.title, a.applied_at
+        SELECT u.full_name, j.title, a.applied_at, u.phone_number
         FROM applications a
         JOIN jobs j ON a.job_id = j.id
         JOIN users u ON a.user_id = u.id
@@ -583,19 +611,30 @@ def show_job_applications(session_id, phone_number, cur):
     applications = cur.fetchall()
     
     if not applications:
-        return ussd_response("No applications received yet.", session_id, False)
+        return ussd_response("No applications received yet.\n\nCheck back later! 📭", session_id, False)
     
     response_text = "Recent Applications:\n\n"
     for app in applications:
-        name, title, applied_at = app
-        response_text += f"- {title}\n  Applicant: {name}\n  Applied: {applied_at.strftime('%d/%m/%Y')}\n\n"
+        name, title, applied_at, applicant_phone = app
+        response_text += f"• {title}\n"
+        response_text += f"  👤 {name}\n"
+        response_text += f"  📞 {applicant_phone}\n"
+        response_text += f"  📅 {applied_at.strftime('%d/%m/%Y')}\n\n"
     
-    response_text += "Contact applicants via their phone numbers."
+    response_text += "Contact applicants via their phone numbers above."
     return ussd_response(response_text, session_id, False)
+
+def update_session(cur, conn, session_id, menu_level, data):
+    cur.execute("""
+        UPDATE ussd_sessions 
+        SET menu_level = %s, data = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE session_id = %s
+    """, (menu_level, json.dumps(data), session_id))
+    conn.commit()
 
 @app.route('/')
 def home():
-    return "Jowa USSD App is running!"
+    return "Jowa USSD App is running! 🇿🇲"
 
 @app.route('/health')
 def health_check():
@@ -626,13 +665,59 @@ def health_check():
         return jsonify({
             'status': 'healthy',
             'database': 'connected',
-            'tables': existing_tables
+            'tables': existing_tables,
+            'timestamp': datetime.now().isoformat()
         })
         
     except Exception as e:
         return jsonify({'status': 'error', 'message': str(e)}), 500
 
+# Add sample data endpoint for testing
+@app.route('/add-sample-data')
+def add_sample_data():
+    """Add sample data for testing"""
+    try:
+        conn = get_db_connection()
+        cur = conn.cursor()
+        
+        # Sample employers
+        employers = [
+            ('+260971234567', 'BuildRight Construction', 'Construction'),
+            ('+260972345678', 'GreenThumb Gardening', 'Gardening'),
+            ('+260973456789', 'CleanSweep Services', 'Cleaning')
+        ]
+        
+        for emp in employers:
+            cur.execute("""
+                INSERT INTO employers (phone_number, company_name, business_type) 
+                VALUES (%s, %s, %s) 
+                ON CONFLICT (phone_number) DO NOTHING
+            """, emp)
+        
+        # Sample jobs
+        cur.execute("""
+            INSERT INTO jobs (employer_id, title, description, location, payment_amount, payment_type) 
+            SELECT id, 'Construction Helper', 'Need helper for construction site', 'Lusaka', 80.00, 'daily'
+            FROM employers WHERE phone_number = '+260971234567'
+            ON CONFLICT DO NOTHING
+        """)
+        
+        cur.execute("""
+            INSERT INTO jobs (employer_id, title, description, location, payment_amount, payment_type) 
+            SELECT id, 'Gardener', 'Experienced gardener needed', 'Ndola', 50.00, 'daily'
+            FROM employers WHERE phone_number = '+260972345678'
+            ON CONFLICT DO NOTHING
+        """)
+        
+        conn.commit()
+        cur.close()
+        conn.close()
+        
+        return jsonify({"status": "success", "message": "Sample data added"})
+        
+    except Exception as e:
+        return jsonify({"status": "error", "message": str(e)})
+
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
-    
