@@ -1,5 +1,5 @@
 from flask import Flask, request, jsonify
-import psycopg2
+import psycopg2 # type: ignore
 import os
 import json
 from datetime import datetime
@@ -39,6 +39,65 @@ def get_db_connection():
     except Exception as e:
         print(f"Database connection error: {e}")
         return None
+    
+    @app.route('/test-db')
+
+def test_db_connection():
+    """Test database connection"""
+    try:
+        conn = get_db_connection()
+        if conn:
+            cur = conn.cursor()
+            cur.execute('SELECT version();')
+            version = cur.fetchone()
+            cur.close()
+            conn.close()
+            return f"✅ Database connected: {version[0]}"
+        else:
+            return "❌ Database connection failed"
+    except Exception as e:
+        return f"❌ Error: {str(e)}"
+
+@app.route('/health')
+def health_check():
+    """Health check endpoint"""
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'status': 'error', 'message': 'Database connection failed'}), 500
+        
+        cur = conn.cursor()
+        
+        # Check if tables exist
+        tables = ['users', 'employers', 'jobs', 'applications', 'ussd_sessions']
+        existing_tables = []
+        
+        for table in tables:
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = %s
+                );
+            """, (table,))
+            exists = cur.fetchone()[0]
+            existing_tables.append({'table': table, 'exists': exists})
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'tables': existing_tables,
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
+@app.route('/')
+def home():
+    return "Jowa USSD App is running! Available endpoints: /health, /test-db, /ussd"
 
 # USSD Response Format
 def ussd_response(text, session_id, continue_session=True):
@@ -576,3 +635,4 @@ def health_check():
 if __name__ == '__main__':
     port = int(os.environ.get("PORT", 5000))
     app.run(host='0.0.0.0', port=port, debug=False)
+    
