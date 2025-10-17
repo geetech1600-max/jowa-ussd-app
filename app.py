@@ -3,22 +3,38 @@ import psycopg2
 import os
 import json
 from datetime import datetime
-import requests
 
 app = Flask(__name__)
 
-# Database configuration - WE WILL UPDATE THIS LATER
-DB_CONFIG = {
-    'dbname': 'jowa_db',
-    'user': 'postgres',
-    'password': 'password',
-    'host': 'localhost',
-    'port': '5432'
-}
+# Database configuration - will be set via environment variables
+def get_db_config():
+    # If DATABASE_URL is provided (common in hosting platforms)
+    if os.environ.get('DATABASE_URL'):
+        try:
+            from urllib.parse import urlparse
+            url = urlparse(os.environ.get('DATABASE_URL'))
+            return {
+                'dbname': url.path[1:],
+                'user': url.username,
+                'password': url.password,
+                'host': url.hostname,
+                'port': url.port
+            }
+        except:
+            pass
+    
+    # Fallback to individual environment variables
+    return {
+        'dbname': os.environ.get('DB_NAME', 'postgres'),
+        'user': os.environ.get('DB_USER', 'postgres'),
+        'password': os.environ.get('DB_PASSWORD', ''),
+        'host': os.environ.get('DB_HOST', 'localhost'),
+        'port': os.environ.get('DB_PORT', '5432')
+    }
 
 def get_db_connection():
     try:
-        conn = psycopg2.connect(**DB_CONFIG)
+        conn = psycopg2.connect(**get_db_config())
         return conn
     except Exception as e:
         print(f"Database connection error: {e}")
@@ -522,5 +538,41 @@ def show_job_applications(session_id, phone_number, cur):
 def home():
     return "Jowa USSD App is running!"
 
+@app.route('/health')
+def health_check():
+    try:
+        conn = get_db_connection()
+        if not conn:
+            return jsonify({'status': 'error', 'message': 'Database connection failed'}), 500
+        
+        cur = conn.cursor()
+        
+        # Check if all tables exist
+        tables = ['users', 'employers', 'jobs', 'applications', 'ussd_sessions']
+        existing_tables = []
+        
+        for table in tables:
+            cur.execute("""
+                SELECT EXISTS (
+                    SELECT FROM information_schema.tables 
+                    WHERE table_name = %s
+                );
+            """, (table,))
+            exists = cur.fetchone()[0]
+            existing_tables.append({'table': table, 'exists': exists})
+        
+        cur.close()
+        conn.close()
+        
+        return jsonify({
+            'status': 'healthy',
+            'database': 'connected',
+            'tables': existing_tables
+        })
+        
+    except Exception as e:
+        return jsonify({'status': 'error', 'message': str(e)}), 500
+
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=True)
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=False)
