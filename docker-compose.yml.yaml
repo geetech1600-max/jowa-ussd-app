@@ -1,0 +1,25 @@
+version: '3.8'
+services:
+  web:
+    build: .
+    ports:
+      - "5000:5000"
+    environment:
+      - DATABASE_URL=postgresql://postgres:CassidyMadando16@db.amtfabgmtsujurppknfg.supabase.co:5432/postgres
+      - SECRET_KEY=728495e15b6c5d935285eb079f7c78b99e6c2a7f6571e528aa7c52e0dbf4715d
+    restart: always
+
+  # Local database for development (optional)
+  db-dev:
+    image: postgres:15
+    environment:
+      - POSTGRES_DB=jowa_dev
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=devpassword
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:

@@ -1,9 +1,6 @@
 # Python
 __pycache__/
 *.py[cod]
- .env
-*.log
-.DS_Store
 *$py.class
 *.so
 .Python
@@ -36,9 +33,11 @@ ENV/
 # Database
 *.db
 *.sqlite3
+jowa_dev.db
 
 # Logs
 *.log
+logs/
 
 # IDE
 .vscode/
@@ -56,3 +55,7 @@ Thumbs.db
 
 # Backups
 backup_*.csv
+
+# Production
+instance/
+.webassets-cache
