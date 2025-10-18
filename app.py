@@ -5,7 +5,7 @@ import json
 from datetime import datetime
 from urllib.parse import urlparse
 import re
-
+import africastalking
 app = Flask(__name__)
 
 # Database configuration
@@ -79,6 +79,199 @@ def ussd_handler():
         # Initialize session if first request
         if text == '':
             return welcome_menu(session_id, phone_number)
+        Initialize Africa's Talking
+def initialize_africas_talking():
+    try:
+        # Use sandbox for testing, live for production
+        username = os.environ.get('AT_USERNAME', 'sandbox')
+        api_key = os.environ.get('AT_API_KEY', '')
+        
+        africastalking.initialize(username, api_key)
+        
+        # Initialize services
+        global sms, ussd_service
+        sms = africastalking.SMS
+        ussd_service = africastalking.USSD
+        
+        print("✅ Africa's Talking initialized successfully")
+        return True
+    except Exception as e:
+        print(f"❌ Africa's Talking initialization failed: {e}")
+        return False
+
+# Call this function when app starts
+#initialize_africas_talking()
+
+# Africa's Talking USSD Callback Endpoint
+@app.route('/at-ussd', methods=['POST'])
+def africas_talking_ussd():
+    """
+    Africa's Talking USSD callback endpoint
+    They will send POST requests to this URL when users dial your USSD code
+    """
+    try:
+        # Get data from Africa's Talking
+        session_id = request.values.get("sessionId")
+        phone_number = request.values.get("phoneNumber")
+        text = request.values.get("text", "")
+        network_code = request.values.get("networkCode")
+        
+        print(f"📱 Africa's Talking USSD: {session_id}, {phone_number}, {text}")
+        
+        # Process the USSD request using your existing logic
+        if text == "":
+            # First menu - welcome screen
+            response = "CON Welcome to JOWA - Find Work in Zambia! 🇿🇲\n\n1. Looking for Work\n2. Post a Job\n3. About Jowa\n4. Contact Support\n\nReply with 1, 2, 3, or 4"
+        else:
+            # Use your existing USSD logic but format for Africa's Talking
+            response = process_africas_talking_ussd(session_id, phone_number, text)
+        
+        return response
+        
+    except Exception as e:
+        print(f"❌ Africa's Talking USSD error: {e}")
+        return "END Sorry, service temporarily unavailable. Please try again later."
+
+def process_africas_talking_ussd(session_id, phone_number, text):
+    """
+    Process USSD input and return Africa's Talking formatted response
+    """
+    try:
+        # Use your existing session management but adapt for Africa's Talking format
+        conn = get_db_connection()
+        if not conn:
+            return "END Service temporarily unavailable. Please try again."
+        
+        cur = conn.cursor()
+        
+        # Get or create session
+        cur.execute("SELECT menu_level, data FROM ussd_sessions WHERE session_id = %s", (session_id,))
+        session_data = cur.fetchone()
+        
+        if not session_data:
+            # New session
+            cur.execute("""
+                INSERT INTO ussd_sessions (session_id, phone_number, menu_level, data) 
+                VALUES (%s, %s, 'main_menu', '{}')
+            """, (session_id, phone_number))
+            conn.commit()
+            menu_level = 'main_menu'
+            data = {}
+        else:
+            menu_level, data_json = session_data
+            data = json.loads(data_json) if data_json else {}
+        
+        # Process based on current menu level
+        response_text = ""
+        continue_session = True
+        
+        if menu_level == 'main_menu':
+            if text == '1':
+                # Job seeker path
+                cur.execute("SELECT full_name FROM users WHERE phone_number = %s", (phone_number,))
+                user = cur.fetchone()
+                
+                if user and user[0]:
+                    update_session(cur, conn, session_id, 'job_seeker_dashboard', {})
+                    response_text = job_seeker_dashboard_at(session_id, phone_number, cur)
+                else:
+                    update_session(cur, conn, session_id, 'job_seeker_registration', {'step': 1})
+                    response_text = "CON Welcome! Let's set up your profile.\n\nEnter your full name:"
+            elif text == '2':
+                # Employer path
+                cur.execute("SELECT company_name FROM employers WHERE phone_number = %s", (phone_number,))
+                employer = cur.fetchone()
+                
+                if employer and employer[0]:
+                    update_session(cur, conn, session_id, 'employer_dashboard', {})
+                    response_text = employer_dashboard_at(session_id, phone_number, cur)
+                else:
+                    update_session(cur, conn, session_id, 'employer_registration', {'step': 1})
+                    response_text = "CON Welcome Employer! Let's register your business.\n\nEnter your company name:"
+            elif text == '3':
+                about_text = """END About JOWA 🇿🇲
+
+Connecting job seekers with employers across Zambia. No internet needed!
+
+• Find daily work opportunities
+• Post jobs for free  
+• Simple USSD interface
+• Trusted by Zambians
+
+For support: +260960000000"""
+                response_text = about_text
+                continue_session = False
+            elif text == '4':
+                support_text = """END Contact Support:
+
+Call: +260960000000
+Email: support@jowa.co.zm
+
+Our team is here to help you with any issues using Jowa.
+
+Thank you for using Jowa!"""
+                response_text = support_text
+                continue_session = False
+            else:
+                response_text = "CON Invalid option. Please reply with 1, 2, 3, or 4\n\n1. Looking for Work\n2. Post a Job\n3. About Jowa\n4. Contact Support"
+        
+        # Add more menu level handling here...
+        # You would adapt all your existing menu functions for Africa's Talking format
+        
+        cur.close()
+        conn.close()
+        
+        return response_text
+        
+    except Exception as e:
+        print(f"❌ Africa's Talking processing error: {e}")
+        return "END Sorry, an error occurred. Please try again."
+
+# Africa's Talking formatted menu functions
+def job_seeker_dashboard_at(session_id, phone_number, cur):
+    cur.execute("SELECT full_name FROM users WHERE phone_number = %s", (phone_number,))
+    user = cur.fetchone()
+    name = user[0] if user else "User"
+    
+    return f"""CON Welcome {name}! 👷
+
+1. Browse Available Jobs
+2. My Applications  
+3. Update Profile
+4. Back to Main Menu
+
+Reply with 1, 2, 3, or 4"""
+
+def employer_dashboard_at(session_id, phone_number, cur):
+    cur.execute("SELECT company_name FROM employers WHERE phone_number = %s", (phone_number,))
+    employer = cur.fetchone()
+    company_name = employer[0] if employer else "Employer"
+    
+    return f"""CON Welcome {company_name}! 🏢
+
+1. Post New Job
+2. View My Jobs
+3. View Applications
+4. Back to Main Menu
+
+Reply with 1, 2, 3, or 4"""
+
+# SMS Notification Function
+def send_sms_notification(phone_number, message):
+    """
+    Send SMS notifications to users
+    """
+    try:
+        if 'sms' in globals():
+            response = sms.send(message, [phone_number])
+            print(f"✅ SMS sent to {phone_number}: {response}")
+            return True
+        else:
+            print(f"ℹ️  SMS simulation to {phone_number}: {message}")
+            return True
+    except Exception as e:
+        print(f"❌ SMS sending failed: {e}")
+        return False
         
         # Process user input
         response = process_input(session_id, phone_number, text)
