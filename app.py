@@ -6,19 +6,30 @@ from datetime import datetime
 from urllib.parse import urlparse
 import re
 import africastalking
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 app = Flask(__name__)
 
-# Set your specific environment variables
-os.environ['AT_USERNAME'] = 'sandbox'
-os.environ['AT_API_KEY'] = 'atsk_f74b6e4b9e0aa7ea82f7c0058d7315528f829f1993888ac1e696b031adb336daa6385c04'
-os.environ['DATABASE_URL'] = 'postgresql://postgres:CassidyMadando16@db.amtfabgmtsujurppknfg.supabase.co:5432/postgres'
-os.environ['DB_HOST'] = 'db.amtfabgmtsujurppknfg.supabase.co'
-os.environ['DB_NAME'] = 'postgres'
-os.environ['DB_USER'] = 'postgres'
-os.environ['DB_PASSWORD'] = 'CassidyMadando16'
-os.environ['DB_PORT'] = '5432'
-os.environ['SECRET_KEY'] = '728495e15b6c5d935285eb079f7c78b99e6c2a7f6571e528aa7c52e0dbf4715d'
+# Set your specific environment variables from .env
+os.environ['AT_USERNAME'] = os.getenv('AT_USERNAME', 'sandbox')
+os.environ['AT_API_KEY'] = os.getenv('AT_API_KEY', 'atsk_f74b6e4b9e0aa7ea82f7c0058d7315528f829f1993888ac1e696b031adb336daa6385c04')
+os.environ['DATABASE_URL'] = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/jowa')
+os.environ['DB_HOST'] = os.getenv('DB_HOST', 'localhost')
+os.environ['DB_NAME'] = os.getenv('DB_NAME', 'jowa')
+os.environ['DB_USER'] = os.getenv('DB_USER', 'postgres')
+os.environ['DB_PASSWORD'] = os.getenv('DB_PASSWORD', 'postgres')
+os.environ['DB_PORT'] = os.getenv('DB_PORT', '5432')
+os.environ['SECRET_KEY'] = os.getenv('SECRET_KEY', '728495e15b6c5d935285eb079f7c78b99e6c2a7f6571e528aa7c52e0dbf4715d')
+
+# Application settings from .env
+DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
+APP_ENV = os.getenv('APP_ENV', 'development')
+USSD_CODE = os.getenv('USSD_CODE', '*384*531#')
+COUNTRY_CODE = os.getenv('COUNTRY_CODE', 'ZM')
+APP_URL = os.getenv('APP_URL', 'http://localhost:5000')
 
 # Initialize Africa's Talking
 def initialize_africas_talking():
@@ -40,38 +51,36 @@ def initialize_africas_talking():
 # Initialize Africa's Talking when app starts
 initialize_africas_talking()
 
-# Database configuration for Supabase
+# Database configuration from environment variables
 def get_db_config():
-    database_url = os.environ.get('DATABASE_URL', 'postgresql://postgres:CassidyMadando16@db.amtfabgmtsujurppknfg.supabase.co:5432/postgres')
+    database_url = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/jowa')
     
     if database_url:
         try:
             url = urlparse(database_url)
             return {
                 'dbname': url.path[1:] if url.path.startswith('/') else url.path,
-                'user': url.username or 'postgres',
-                'password': url.password or 'CassidyMadando16',
-                'host': url.hostname or 'db.amtfabgmtsujurppknfg.supabase.co',
-                'port': url.port or 5432,
-                'sslmode': 'require'
+                'user': url.username or os.environ.get('DB_USER', 'postgres'),
+                'password': url.password or os.environ.get('DB_PASSWORD', 'postgres'),
+                'host': url.hostname or os.environ.get('DB_HOST', 'localhost'),
+                'port': url.port or int(os.environ.get('DB_PORT', 5432))
             }
         except Exception as e:
             print(f"Error parsing DATABASE_URL: {e}")
     
-    # Fallback to individual environment variables for Supabase
+    # Fallback to individual environment variables
     return {
-        'dbname': os.environ.get('DB_NAME', 'postgres'),
+        'dbname': os.environ.get('DB_NAME', 'jowa'),
         'user': os.environ.get('DB_USER', 'postgres'),
-        'password': os.environ.get('DB_PASSWORD', 'CassidyMadando16'),
-        'host': os.environ.get('DB_HOST', 'db.amtfabgmtsujurppknfg.supabase.co'),
-        'port': os.environ.get('DB_PORT', '5432'),
-        'sslmode': 'require'
+        'password': os.environ.get('DB_PASSWORD', 'postgres'),
+        'host': os.environ.get('DB_HOST', 'localhost'),
+        'port': int(os.environ.get('DB_PORT', 5432))
     }
 
 def get_db_connection():
     try:
         config = get_db_config()
-        print(f"Connecting to database: {config['host']}")
+        print(f"Connecting to database: {config['host']}:{config['port']}/{config['dbname']}")
         conn = psycopg2.connect(**config)
         print("Database connection successful")
         return conn
@@ -831,7 +840,6 @@ def handle_browse_jobs(session_id, phone_number, text, cur, conn, data):
     if text.isdigit():
         choice = int(text)
         if 1 <= choice <= 3:
-            # Apply for job
             offset = page * 3
             cur.execute("""
                 SELECT j.id, j.title FROM jobs j
@@ -844,43 +852,37 @@ def handle_browse_jobs(session_id, phone_number, text, cur, conn, data):
             if choice <= len(jobs):
                 job_id, job_title = jobs[choice-1]
                 
-                # Get user ID
                 cur.execute("SELECT id FROM users WHERE phone_number = %s", (phone_number,))
                 user_id = cur.fetchone()[0]
                 
-                # Check if already applied
                 cur.execute("""
                     SELECT id FROM applications 
                     WHERE job_id = %s AND user_id = %s
                 """, (job_id, user_id))
                 
                 if not cur.fetchone():
-                    # Create application
                     cur.execute("""
                         INSERT INTO applications (job_id, user_id, status)
                         VALUES (%s, %s, 'pending')
                     """, (job_id, user_id))
                     conn.commit()
                     
-                    # Send SMS notification
-                    send_sms_notification(phone_number, f"Thank you for applying to {job_title}. The employer will contact you soon.")
+                    # Send SMS notification to employer
+                    send_sms_notification(phone_number, f"New application received for job: {job_title}. Applicant: {phone_number}")
                 
                 return ussd_response(f"Application submitted for: {job_title}\n\nEmployer will contact you soon!", session_id, False)
         
         elif choice == 4:
-            # Next page
             page += 1
             data['page'] = page
             update_session(cur, conn, session_id, 'browse_jobs', data)
             return browse_jobs(session_id, phone_number, cur, page)
         
         elif choice == 5:
-            # Back to job seeker dashboard
             update_session(cur, conn, session_id, 'job_seeker_dashboard', {})
             return job_seeker_dashboard(session_id, phone_number, cur)
         
         elif choice == 0:
-            # Back to main menu
             update_session(cur, conn, session_id, 'main_menu', {})
             return welcome_menu(session_id, phone_number)
     
@@ -974,7 +976,6 @@ def handle_employer_registration(session_id, phone_number, text, cur, conn, data
         return employer_dashboard(session_id, phone_number, cur)
 
 def employer_dashboard(session_id, phone_number, cur):
-    # Get employer info
     cur.execute("SELECT company_name FROM employers WHERE phone_number = %s", (phone_number,))
     employer = cur.fetchone()
     
@@ -1013,28 +1014,24 @@ def handle_post_job(session_id, phone_number, text, cur, conn, data):
     step = data.get('step', 1)
     
     if step == 1:
-        # Get job title
         data['title'] = text
         data['step'] = 2
         update_session(cur, conn, session_id, 'post_job', data)
         return ussd_response("Enter job description:", session_id)
     
     elif step == 2:
-        # Get job description
         data['description'] = text
         data['step'] = 3
         update_session(cur, conn, session_id, 'post_job', data)
         return ussd_response("Enter job location:", session_id)
     
     elif step == 3:
-        # Get job location
         data['location'] = text
         data['step'] = 4
         update_session(cur, conn, session_id, 'post_job', data)
         return ussd_response("Enter payment amount (e.g., 50):", session_id)
     
     elif step == 4:
-        # Get payment amount
         if not validate_payment_amount(text):
             return ussd_response("Please enter a valid payment amount (e.g., 50):", session_id)
         
@@ -1044,7 +1041,6 @@ def handle_post_job(session_id, phone_number, text, cur, conn, data):
         return ussd_response("Enter payment type:\n1. Hourly\n2. Daily\n3. Project\n\nReply 1, 2, or 3", session_id)
     
     elif step == 5:
-        # Get payment type and save job
         payment_types = {'1': 'hourly', '2': 'daily', '3': 'project'}
         payment_type = payment_types.get(text)
         
@@ -1053,11 +1049,9 @@ def handle_post_job(session_id, phone_number, text, cur, conn, data):
         
         data['payment_type'] = payment_type
         
-        # Get employer ID
         cur.execute("SELECT id FROM employers WHERE phone_number = %s", (phone_number,))
         employer_id = cur.fetchone()[0]
         
-        # Save job to database
         cur.execute("""
             INSERT INTO jobs (employer_id, title, description, location, payment_amount, payment_type)
             VALUES (%s, %s, %s, %s, %s, %s)
@@ -1133,42 +1127,27 @@ def update_session(cur, conn, session_id, menu_level, data):
 # Health check endpoint
 @app.route('/health', methods=['GET'])
 def health_check():
-    try:
-        conn = get_db_connection()
-        if conn:
-            cur = conn.cursor()
-            cur.execute("SELECT 1")
-            cur.close()
-            conn.close()
-            return jsonify({
-                "status": "healthy", 
-                "database": "connected",
-                "app": "JOWA USSD App",
-                "timestamp": datetime.now().isoformat()
-            }), 200
-        else:
-            return jsonify({"status": "unhealthy", "database": "disconnected"}), 503
-    except Exception as e:
-        return jsonify({"status": "unhealthy", "error": str(e)}), 503
+    return jsonify({
+        "status": "healthy",
+        "timestamp": datetime.now().isoformat(),
+        "environment": APP_ENV
+    })
 
-# SMS callback endpoint for Africa's Talking
-@app.route('/at-sms-callback', methods=['POST'])
-def sms_callback():
-    try:
-        data = request.get_json()
-        print(f"SMS Callback received: {data}")
-        return jsonify({"status": "success"}), 200
-    except Exception as e:
-        print(f"SMS callback error: {e}")
-        return jsonify({"status": "error"}), 400
-
+# Home route
 @app.route('/')
 def home():
-    return "JOWA USSD App is running! Database: db.amtfabgmtsujurppknfg.supabase.co"
+    return jsonify({
+        "message": "JOWA USSD Service",
+        "status": "running",
+        "environment": APP_ENV,
+        "timestamp": datetime.now().isoformat()
+    })
 
 if __name__ == '__main__':
     port = int(os.environ.get('PORT', 5000))
-    print("Starting JOWA USSD App...")
-    print("Africa's Talking Username:", os.environ.get('AT_USERNAME'))
-    print("Database Host:", os.environ.get('DB_HOST'))
-    app.run(host='0.0.0.0', port=port, debug=False)
+    debug = DEBUG
+    app.run(host='0.0.0.0', port=port, debug=debug)
+    if __name__ == '__main__':
+    port = int(os.environ.get('PORT', 5000))
+    debug = os.environ.get('DEBUG', 'False').lower() == 'true'
+    app.run(host='0.0.0.0', port=port, debug=debug)

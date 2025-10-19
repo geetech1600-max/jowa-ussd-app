@@ -1,13 +1,12 @@
-# ========================================
-# JOWA USSD APP CONFIGURATION
-# ========================================
+# create_env_file.py
+env_content = """# JOWA USSD APP CONFIGURATION
 
-# Database Configuration (Supabase)
-DATABASE_URL=postgresql://postgres:CassidyMadando16@db.amtfabgmtsujurppknfg.supabase.co:5432/postgres
-DB_HOST=db.amtfabgmtsujurppknfg.supabase.co
-DB_NAME=postgres
+# Database Configuration (PostgreSQL)
+DATABASE_URL=postgresql://postgres:postgres@localhost:5432/jowa
+DB_HOST=localhost
+DB_NAME=jowa
 DB_USER=postgres
-DB_PASSWORD=CassidyMadando16
+DB_PASSWORD=postgres
 DB_PORT=5432
 
 # Application Settings
@@ -25,3 +24,9 @@ AT_API_KEY=atsk_f74b6e4b9e0aa7ea82f7c0058d7315528f829f1993888ac1e696b031adb336da
 
 # Application URLs
 APP_URL=http://localhost:5000
+"""
+
+with open('.env', 'w') as f:
+    f.write(env_content)
+
+print("Created .env file successfully")

@@ -1,3 +1,4 @@
+# services/database_service.py
 import psycopg2
 import os
 from dotenv import load_dotenv
@@ -12,27 +13,28 @@ class DatabaseService:
     def get_db_config(self):
         database_url = os.getenv('DATABASE_URL')
         
-        if database_url:
+        if database_url and database_url.startswith('postgresql://'):
             try:
                 url = urlparse(database_url)
                 return {
-                    'dbname': url.path[1:] if url.path.startswith('/') else url.path,
-                    'user': url.username or 'postgres',
-                    'password': url.password or 'CassidyMadando16',
-                    'host': url.hostname or 'db.amtfabgmtsujurppknfg.supabase.co',
+                    'dbname': url.path[1:],  # Remove leading slash
+                    'user': url.username,
+                    'password': url.password,
+                    'host': url.hostname,
                     'port': url.port or 5432,
-                    'sslmode': 'require'
+                    'sslmode': 'disable'  # Add this line to disable SSL
                 }
-            except Exception as e:
-                print(f"Error parsing DATABASE_URL: {e}")
+            except:
+                pass
         
+        # Fallback to individual environment variables
         return {
-            'dbname': os.getenv('DB_NAME', 'postgres'),
+            'dbname': os.getenv('DB_NAME', 'jowa'),
             'user': os.getenv('DB_USER', 'postgres'),
-            'password': os.getenv('DB_PASSWORD', 'CassidyMadando16'),
-            'host': os.getenv('DB_HOST', 'db.amtfabgmtsujurppknfg.supabase.co'),
+            'password': os.getenv('DB_PASSWORD', 'postgres'),
+            'host': os.getenv('DB_HOST', 'localhost'),
             'port': os.getenv('DB_PORT', '5432'),
-            'sslmode': 'require'
+            'sslmode': 'disable'  # Add this line
         }
 
     def get_connection(self):
@@ -40,31 +42,7 @@ class DatabaseService:
             conn = psycopg2.connect(**self.config)
             return conn
         except Exception as e:
-            print(f"Database connection error: {e}")
-            return None
-
-    def execute_query(self, query, params=None):
-        conn = self.get_connection()
-        if not conn:
-            return None
-        
-        try:
-            cur = conn.cursor()
-            cur.execute(query, params or ())
-            
-            if query.strip().upper().startswith('SELECT'):
-                result = cur.fetchall()
-                columns = [desc[0] for desc in cur.description]
-                return [dict(zip(columns, row)) for row in result]
-            else:
-                conn.commit()
-                return cur.rowcount
-            
-            cur.close()
-            conn.close()
-        except Exception as e:
-            print(f"Query execution error: {e}")
-            conn.rollback()
+            print(f"PostgreSQL connection error: {e}")
             return None
 
     def health_check(self):
@@ -77,5 +55,6 @@ class DatabaseService:
                 conn.close()
                 return True
             return False
-        except:
+        except Exception as e:
+            print(f"Health check failed: {e}")
             return False

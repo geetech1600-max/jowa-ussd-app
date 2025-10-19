@@ -1,3 +1,5 @@
+# Enhanced .gitignore for JOWA project
+
 # Python
 __pycache__/
 *.py[cod]
@@ -20,42 +22,82 @@ wheels/
 .installed.cfg
 *.egg
 MANIFEST
+pip-wheel-metadata/
 
 # Virtual environments
 venv/
 env/
 ENV/
 
-# Environment variables
+# Environment variables - CRITICAL: Never commit .env files!
 .env
 .venv
+.env.local
+.env.production
+.env.development
 
 # Database
 *.db
 *.sqlite3
 jowa_dev.db
+database/local/
 
 # Logs
 *.log
 logs/
+python_logs/
 
 # IDE
 .vscode/
 .idea/
 *.swp
 *.swo
+*.sublime-project
+*.sublime-workspace
 
 # OS
 .DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
 Thumbs.db
 
 # Temporary files
 *.tmp
 *.temp
+*.cache
+.cache/
 
 # Backups
 backup_*.csv
+*.bak
+*.backup
 
 # Production
 instance/
 .webassets-cache
+
+# Coverage reports
+htmlcov/
+.coverage
+.coverage.*
+coverage.xml
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# PyCharm
+.idea/
+
+# macOS
+.AppleDouble
+.LSOverride
+
+# Windows
+[Dd]esktop.ini
+$RECYCLE.BIN/
+
+# Linux
+*~
