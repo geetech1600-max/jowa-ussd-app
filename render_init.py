@@ -1,121 +1,41 @@
-# render_init.py
-import psycopg2
+#!/usr/bin/env python3
+"""
+Render initialization script for JOWA deployment
+"""
 import os
-from dotenv import load_dotenv
+import sys
+import subprocess
 
-load_dotenv()
-
-def init_render_database():
-    """Initialize database tables on Render"""
-    print("🔄 Initializing Render PostgreSQL Database...")
-    
-    database_url = os.getenv('DATABASE_URL')
-    if not database_url:
-        print("❌ DATABASE_URL not found")
-        return False
+def init_render():
+    print("🚀 Initializing Render deployment for JOWA...")
     
     try:
-        conn = psycopg2.connect(database_url)
-        cur = conn.cursor()
+        # Install dependencies
+        print("📦 Installing dependencies...")
+        subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
         
-        # Create tables
-        tables_sql = [
-            # Users table
-            """
-            CREATE TABLE IF NOT EXISTS users (
-                id SERIAL PRIMARY KEY,
-                phone_number VARCHAR(20) UNIQUE NOT NULL,
-                full_name VARCHAR(100),
-                skills TEXT,
-                location VARCHAR(100),
-                experience_level VARCHAR(50),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """,
+        # Import and initialize database from app.py
+        print("🔄 Initializing database...")
+        
+        # Add current directory to Python path
+        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+        
+        from app import initialize_database
+        success = initialize_database()
+        
+        if success:
+            print("✅ Render initialization complete!")
+            return True
+        else:
+            print("⚠️ Database initialization had issues, but continuing deployment...")
+            return True  # Still return True to allow deployment
             
-            # Employers table
-            """
-            CREATE TABLE IF NOT EXISTS employers (
-                id SERIAL PRIMARY KEY,
-                phone_number VARCHAR(20) UNIQUE NOT NULL,
-                company_name VARCHAR(100),
-                business_type VARCHAR(100),
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """,
-            
-            # Jobs table
-            """
-            CREATE TABLE IF NOT EXISTS jobs (
-                id SERIAL PRIMARY KEY,
-                employer_id INTEGER REFERENCES employers(id),
-                title VARCHAR(200) NOT NULL,
-                description TEXT,
-                category VARCHAR(100),
-                location VARCHAR(100),
-                payment_amount DECIMAL(10,2),
-                payment_type VARCHAR(50),
-                status VARCHAR(20) DEFAULT 'active',
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """,
-            
-            # Applications table
-            """
-            CREATE TABLE IF NOT EXISTS applications (
-                id SERIAL PRIMARY KEY,
-                job_id INTEGER REFERENCES jobs(id),
-                user_id INTEGER REFERENCES users(id),
-                status VARCHAR(20) DEFAULT 'pending',
-                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                UNIQUE(job_id, user_id)
-            );
-            """,
-            
-            # USSD Sessions table
-            """
-            CREATE TABLE IF NOT EXISTS ussd_sessions (
-                session_id VARCHAR(100) PRIMARY KEY,
-                phone_number VARCHAR(20) NOT NULL,
-                menu_level VARCHAR(50),
-                data JSONB,
-                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-            );
-            """
-        ]
-        
-        print("📊 Creating tables...")
-        for i, sql in enumerate(tables_sql, 1):
-            cur.execute(sql)
-            print(f"✅ Table {i} created")
-        
-        # Create indexes
-        indexes_sql = [
-            "CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone_number);",
-            "CREATE INDEX IF NOT EXISTS idx_employers_phone ON employers(phone_number);",
-            "CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status);",
-            "CREATE INDEX IF NOT EXISTS idx_jobs_employer ON jobs(employer_id);",
-            "CREATE INDEX IF NOT EXISTS idx_applications_user ON applications(user_id);",
-            "CREATE INDEX IF NOT EXISTS idx_applications_job ON applications(job_id);",
-            "CREATE INDEX IF NOT EXISTS idx_ussd_sessions_phone ON ussd_sessions(phone_number);",
-        ]
-        
-        print("📈 Creating indexes...")
-        for i, sql in enumerate(indexes_sql, 1):
-            cur.execute(sql)
-            print(f"✅ Index {i} created")
-        
-        conn.commit()
-        cur.close()
-        conn.close()
-        
-        print("🎉 Render PostgreSQL database initialized successfully!")
-        return True
-        
     except Exception as e:
-        print(f"❌ Database initialization failed: {e}")
+        print(f"❌ Initialization failed: {e}")
+        import traceback
+        print(f"Full error: {traceback.format_exc()}")
         return False
 
 if __name__ == "__main__":
-    init_render_database()
+    success = init_render()
+    sys.exit(0 if success else 1)

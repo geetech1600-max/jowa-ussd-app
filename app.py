@@ -3,7 +3,6 @@ import psycopg2
 import os
 import json
 from datetime import datetime
-from urllib.parse import urlparse
 import re
 import africastalking
 from dotenv import load_dotenv
@@ -40,19 +39,22 @@ def initialize_africas_talking():
 # Initialize Africa's Talking when app starts
 initialize_africas_talking()
 
-# Render PostgreSQL Database Configuration
+# Fixed Render PostgreSQL Database Configuration
 def get_db_connection():
     try:
         # Render provides DATABASE_URL environment variable
         database_url = os.getenv('DATABASE_URL')
         
         if database_url:
-            # For Render PostgreSQL
-            print("Using DATABASE_URL from environment")
+            # For Render PostgreSQL - fix the URL format if needed
+            if database_url.startswith('postgres://'):
+                database_url = database_url.replace('postgres://', 'postgresql://', 1)
+            
+            print("🔗 Connecting to Render PostgreSQL database...")
             conn = psycopg2.connect(database_url, sslmode='require')
         else:
             # Fallback for local development
-            print("Using local database configuration")
+            print("🔗 Connecting to local development database...")
             conn = psycopg2.connect(
                 host=os.getenv('DB_HOST', 'localhost'),
                 database=os.getenv('DB_NAME', 'jowa'),
@@ -61,11 +63,112 @@ def get_db_connection():
                 port=os.getenv('DB_PORT', '5432')
             )
         
-        print("Database connection successful")
+        print("✅ Database connection successful")
         return conn
+        
     except Exception as e:
-        print(f"Database connection error: {e}")
+        print(f"❌ Database connection error: {e}")
+        import traceback
+        print(f"Detailed error: {traceback.format_exc()}")
         return None
+
+# Initialize database tables - FIXED VERSION
+def initialize_database():
+    print("🔄 Starting database initialization...")
+    
+    conn = get_db_connection()
+    if not conn:
+        print("❌ Database initialization failed: Could not connect to database")
+        return False
+    
+    cur = conn.cursor()
+    
+    try:
+        print("📊 Creating database tables...")
+        
+        # Create users table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS users (
+                id SERIAL PRIMARY KEY,
+                phone_number VARCHAR(20) UNIQUE NOT NULL,
+                full_name VARCHAR(100),
+                skills TEXT,
+                location VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✅ Created users table")
+        
+        # Create employers table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS employers (
+                id SERIAL PRIMARY KEY,
+                phone_number VARCHAR(20) UNIQUE NOT NULL,
+                company_name VARCHAR(100),
+                business_type VARCHAR(100),
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✅ Created employers table")
+        
+        # Create jobs table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS jobs (
+                id SERIAL PRIMARY KEY,
+                employer_id INTEGER REFERENCES employers(id),
+                title VARCHAR(100) NOT NULL,
+                description TEXT,
+                location VARCHAR(100),
+                payment_amount DECIMAL(10,2),
+                payment_type VARCHAR(20),
+                status VARCHAR(20) DEFAULT 'active',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✅ Created jobs table")
+        
+        # Create applications table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS applications (
+                id SERIAL PRIMARY KEY,
+                job_id INTEGER REFERENCES jobs(id),
+                user_id INTEGER REFERENCES users(id),
+                status VARCHAR(20) DEFAULT 'pending',
+                applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(job_id, user_id)
+            )
+        """)
+        print("✅ Created applications table")
+        
+        # Create USSD sessions table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS ussd_sessions (
+                session_id VARCHAR(100) PRIMARY KEY,
+                phone_number VARCHAR(20) NOT NULL,
+                menu_level VARCHAR(50),
+                data JSONB,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✅ Created ussd_sessions table")
+        
+        conn.commit()
+        print("🎉 Database tables initialized successfully!")
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error initializing database: {e}")
+        import traceback
+        print(f"Full error: {traceback.format_exc()}")
+        conn.rollback()
+        return False
+    finally:
+        cur.close()
+        conn.close()
 
 # USSD Response Format
 def ussd_response(text, session_id, continue_session=True):
@@ -1222,97 +1325,28 @@ def home():
         "timestamp": datetime.now().isoformat()
     })
 
-# Initialize database tables
-def initialize_database():
-    conn = get_db_connection()
-    if conn:
-        cur = conn.cursor()
-        
-        try:
-            # Create users table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    id SERIAL PRIMARY KEY,
-                    phone_number VARCHAR(20) UNIQUE NOT NULL,
-                    full_name VARCHAR(100),
-                    skills TEXT,
-                    location VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create employers table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS employers (
-                    id SERIAL PRIMARY KEY,
-                    phone_number VARCHAR(20) UNIQUE NOT NULL,
-                    company_name VARCHAR(100),
-                    business_type VARCHAR(100),
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create jobs table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS jobs (
-                    id SERIAL PRIMARY KEY,
-                    employer_id INTEGER REFERENCES employers(id),
-                    title VARCHAR(100) NOT NULL,
-                    description TEXT,
-                    location VARCHAR(100),
-                    payment_amount DECIMAL(10,2),
-                    payment_type VARCHAR(20),
-                    status VARCHAR(20) DEFAULT 'active',
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            # Create applications table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS applications (
-                    id SERIAL PRIMARY KEY,
-                    job_id INTEGER REFERENCES jobs(id),
-                    user_id INTEGER REFERENCES users(id),
-                    status VARCHAR(20) DEFAULT 'pending',
-                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    UNIQUE(job_id, user_id)
-                )
-            """)
-            
-            # Create USSD sessions table
-            cur.execute("""
-                CREATE TABLE IF NOT EXISTS ussd_sessions (
-                    session_id VARCHAR(100) PRIMARY KEY,
-                    phone_number VARCHAR(20) NOT NULL,
-                    menu_level VARCHAR(50),
-                    data JSONB,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-                )
-            """)
-            
-            conn.commit()
-            print("Database tables initialized successfully")
-        except Exception as e:
-            print(f"Error initializing database: {e}")
-        finally:
-            cur.close()
-            conn.close()
-
 if __name__ == '__main__':
-    # Initialize database tables
-    initialize_database()
+    # Initialize database tables - but don't crash if it fails
+    print("🚀 Starting JOWA USSD Application...")
+    
+    # Try to initialize database, but continue even if it fails
+    try:
+        db_success = initialize_database()
+        if db_success:
+            print("✅ Database setup completed successfully")
+        else:
+            print("⚠️ Database setup had issues, but continuing...")
+    except Exception as e:
+        print(f"⚠️ Database initialization error: {e}")
+        print("🔄 Continuing with application startup...")
     
     # Run the application
     port = int(os.getenv('PORT', 5000))
     debug = os.getenv('DEBUG', 'True').lower() == 'true'
     
-    print(f"Starting JOWA USSD Application on port {port}")
-    print(f"Debug mode: {debug}")
-    print(f"Environment: {APP_ENV}")
-    print(f"USSD Code: {USSD_CODE}")
+    print(f"🌐 Starting server on port {port}")
+    print(f"🔧 Debug mode: {debug}")
+    print(f"🏭 Environment: {APP_ENV}")
+    print(f"📞 USSD Code: {USSD_CODE}")
     
     app.run(host='0.0.0.0', port=port, debug=debug)
