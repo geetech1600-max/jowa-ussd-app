@@ -39,22 +39,29 @@ def initialize_africas_talking():
 # Initialize Africa's Talking when app starts
 initialize_africas_talking()
 
-# Fixed Render PostgreSQL Database Configuration
+# FIXED Render PostgreSQL Database Configuration
 def get_db_connection():
     try:
         # Render provides DATABASE_URL environment variable
         database_url = os.getenv('DATABASE_URL')
         
+        print(f"🔍 DATABASE_URL exists: {bool(database_url)}")
+        print(f"🔍 APP_ENV: {APP_ENV}")
+        
         if database_url:
             # For Render PostgreSQL - fix the URL format if needed
             if database_url.startswith('postgres://'):
                 database_url = database_url.replace('postgres://', 'postgresql://', 1)
+                print("🔧 Fixed URL format from postgres:// to postgresql://")
             
             print("🔗 Connecting to Render PostgreSQL database...")
-            conn = psycopg2.connect(database_url, sslmode='require')
+            # Use the DATABASE_URL directly - Render handles SSL automatically
+            conn = psycopg2.connect(database_url)
+            print("✅ Render PostgreSQL connection successful!")
+            
         else:
             # Fallback for local development
-            print("🔗 Connecting to local development database...")
+            print("🔗 Using local development database configuration...")
             conn = psycopg2.connect(
                 host=os.getenv('DB_HOST', 'localhost'),
                 database=os.getenv('DB_NAME', 'jowa'),
@@ -62,14 +69,14 @@ def get_db_connection():
                 password=os.getenv('DB_PASSWORD', 'postgres'),
                 port=os.getenv('DB_PORT', '5432')
             )
+            print("✅ Local database connection successful!")
         
-        print("✅ Database connection successful")
         return conn
         
     except Exception as e:
         print(f"❌ Database connection error: {e}")
         import traceback
-        print(f"Detailed error: {traceback.format_exc()}")
+        print(f"🔍 Detailed error: {traceback.format_exc()}")
         return None
 
 # Initialize database tables - FIXED VERSION
@@ -163,7 +170,7 @@ def initialize_database():
     except Exception as e:
         print(f"❌ Error initializing database: {e}")
         import traceback
-        print(f"Full error: {traceback.format_exc()}")
+        print(f"🔍 Full error: {traceback.format_exc()}")
         conn.rollback()
         return False
     finally:
