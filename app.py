@@ -40,37 +40,27 @@ def initialize_africas_talking():
 # Initialize Africa's Talking when app starts
 initialize_africas_talking()
 
-# Database configuration from environment variables
-def get_db_config():
-    database_url = os.getenv('DATABASE_URL')
-    
-    if database_url:
-        try:
-            url = urlparse(database_url)
-            return {
-                'dbname': url.path[1:] if url.path.startswith('/') else url.path,
-                'user': url.username or os.getenv('DB_USER', 'postgres'),
-                'password': url.password or os.getenv('DB_PASSWORD', 'postgres'),
-                'host': url.hostname or os.getenv('DB_HOST', 'localhost'),
-                'port': url.port or int(os.getenv('DB_PORT', 5432))
-            }
-        except Exception as e:
-            print(f"Error parsing DATABASE_URL: {e}")
-    
-    # Fallback to individual environment variables
-    return {
-        'dbname': os.getenv('DB_NAME', 'jowa'),
-        'user': os.getenv('DB_USER', 'postgres'),
-        'password': os.getenv('DB_PASSWORD', 'postgres'),
-        'host': os.getenv('DB_HOST', 'localhost'),
-        'port': int(os.getenv('DB_PORT', 5432))
-    }
-
+# Render PostgreSQL Database Configuration
 def get_db_connection():
     try:
-        config = get_db_config()
-        print(f"Connecting to database: {config['host']}:{config['port']}/{config['dbname']}")
-        conn = psycopg2.connect(**config)
+        # Render provides DATABASE_URL environment variable
+        database_url = os.getenv('DATABASE_URL')
+        
+        if database_url:
+            # For Render PostgreSQL
+            print("Using DATABASE_URL from environment")
+            conn = psycopg2.connect(database_url, sslmode='require')
+        else:
+            # Fallback for local development
+            print("Using local database configuration")
+            conn = psycopg2.connect(
+                host=os.getenv('DB_HOST', 'localhost'),
+                database=os.getenv('DB_NAME', 'jowa'),
+                user=os.getenv('DB_USER', 'postgres'),
+                password=os.getenv('DB_PASSWORD', 'postgres'),
+                port=os.getenv('DB_PORT', '5432')
+            )
+        
         print("Database connection successful")
         return conn
     except Exception as e:
