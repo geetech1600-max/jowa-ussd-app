@@ -13,17 +13,6 @@ load_dotenv()
 
 app = Flask(__name__)
 
-# Set your specific environment variables from .env
-os.environ['AT_USERNAME'] = os.getenv('AT_USERNAME', 'sandbox')
-os.environ['AT_API_KEY'] = os.getenv('AT_API_KEY', 'atsk_f74b6e4b9e0aa7ea82f7c0058d7315528f829f1993888ac1e696b031adb336daa6385c04')
-os.environ['DATABASE_URL'] = os.getenv('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/jowa')
-os.environ['DB_HOST'] = os.getenv('DB_HOST', 'localhost')
-os.environ['DB_NAME'] = os.getenv('DB_NAME', 'jowa')
-os.environ['DB_USER'] = os.getenv('DB_USER', 'postgres')
-os.environ['DB_PASSWORD'] = os.getenv('DB_PASSWORD', 'postgres')
-os.environ['DB_PORT'] = os.getenv('DB_PORT', '5432')
-os.environ['SECRET_KEY'] = os.getenv('SECRET_KEY', '728495e15b6c5d935285eb079f7c78b99e6c2a7f6571e528aa7c52e0dbf4715d')
-
 # Application settings from .env
 DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 APP_ENV = os.getenv('APP_ENV', 'development')
@@ -34,8 +23,8 @@ APP_URL = os.getenv('APP_URL', 'http://localhost:5000')
 # Initialize Africa's Talking
 def initialize_africas_talking():
     try:
-        username = os.environ.get('AT_USERNAME', 'sandbox')
-        api_key = os.environ.get('AT_API_KEY', 'atsk_f74b6e4b9e0aa7ea82f7c0058d7315528f829f1993888ac1e696b031adb336daa6385c04')
+        username = os.getenv('AT_USERNAME', 'sandbox')
+        api_key = os.getenv('AT_API_KEY', 'atsk_f74b6e4b9e0aa7ea82f7c0058d7315528f829f1993888ac1e696b031adb336daa6385c04')
         
         africastalking.initialize(username, api_key)
         
@@ -53,28 +42,28 @@ initialize_africas_talking()
 
 # Database configuration from environment variables
 def get_db_config():
-    database_url = os.environ.get('DATABASE_URL', 'postgresql://postgres:postgres@localhost:5432/jowa')
+    database_url = os.getenv('DATABASE_URL')
     
     if database_url:
         try:
             url = urlparse(database_url)
             return {
                 'dbname': url.path[1:] if url.path.startswith('/') else url.path,
-                'user': url.username or os.environ.get('DB_USER', 'postgres'),
-                'password': url.password or os.environ.get('DB_PASSWORD', 'postgres'),
-                'host': url.hostname or os.environ.get('DB_HOST', 'localhost'),
-                'port': url.port or int(os.environ.get('DB_PORT', 5432))
+                'user': url.username or os.getenv('DB_USER', 'postgres'),
+                'password': url.password or os.getenv('DB_PASSWORD', 'postgres'),
+                'host': url.hostname or os.getenv('DB_HOST', 'localhost'),
+                'port': url.port or int(os.getenv('DB_PORT', 5432))
             }
         except Exception as e:
             print(f"Error parsing DATABASE_URL: {e}")
     
     # Fallback to individual environment variables
     return {
-        'dbname': os.environ.get('DB_NAME', 'jowa'),
-        'user': os.environ.get('DB_USER', 'postgres'),
-        'password': os.environ.get('DB_PASSWORD', 'postgres'),
-        'host': os.environ.get('DB_HOST', 'localhost'),
-        'port': int(os.environ.get('DB_PORT', 5432))
+        'dbname': os.getenv('DB_NAME', 'jowa'),
+        'user': os.getenv('DB_USER', 'postgres'),
+        'password': os.getenv('DB_PASSWORD', 'postgres'),
+        'host': os.getenv('DB_HOST', 'localhost'),
+        'port': int(os.getenv('DB_PORT', 5432))
     }
 
 def get_db_connection():
@@ -108,6 +97,32 @@ def validate_payment_amount(amount):
     except:
         return False
 
+# Update session function
+def update_session(cur, conn, session_id, menu_level, data):
+    cur.execute("""
+        UPDATE ussd_sessions 
+        SET menu_level = %s, data = %s, updated_at = CURRENT_TIMESTAMP
+        WHERE session_id = %s
+    """, (menu_level, json.dumps(data), session_id))
+    conn.commit()
+
+# SMS Notification Function
+def send_sms_notification(phone_number, message):
+    """
+    Send SMS notifications to users
+    """
+    try:
+        if 'sms' in globals() and sms is not None:
+            response = sms.send(message, [phone_number])
+            print(f"SMS sent to {phone_number}: {response}")
+            return True
+        else:
+            print(f"SMS simulation to {phone_number}: {message}")
+            return True
+    except Exception as e:
+        print(f"SMS sending failed: {e}")
+        return False
+
 # Main USSD Handler
 @app.route('/ussd', methods=['POST'])
 def ussd_handler():
@@ -120,6 +135,9 @@ def ussd_handler():
         phone_number = data.get('phoneNumber')
         text = data.get('text', '')
         
+        if not session_id or not phone_number:
+            return jsonify({"error": "Missing sessionId or phoneNumber"}), 400
+            
         if not validate_phone_number(phone_number):
             return jsonify(ussd_response("Invalid phone number format. Use +260 format.", session_id, False))
         
@@ -134,7 +152,7 @@ def ussd_handler():
         return jsonify(response)
         
     except Exception as e:
-        print(f"Error: {str(e)}")
+        print(f"Error in ussd_handler: {str(e)}")
         return jsonify(ussd_response("Sorry, an error occurred. Please try again.", session_id, False))
 
 # Africa's Talking USSD Callback Endpoint
@@ -150,6 +168,9 @@ def africas_talking_ussd():
         text = request.values.get("text", "")
         network_code = request.values.get("networkCode")
         
+        if not session_id or not phone_number:
+            return "END Invalid request. Missing sessionId or phoneNumber."
+            
         print(f"Africa's Talking USSD: {session_id}, {phone_number}, {text}")
         
         # Process the USSD request
@@ -245,6 +266,9 @@ def process_africas_talking_ussd(session_id, phone_number, text):
         elif menu_level == 'browse_jobs':
             response_text = handle_browse_jobs_at(session_id, phone_number, text, cur, conn, data)
         
+        elif menu_level == 'view_applications':
+            response_text = handle_view_applications_at(session_id, phone_number, text, cur, conn, data)
+        
         else:
             response_text = "END Invalid option. Please dial the USSD code again to start."
         
@@ -301,14 +325,20 @@ def handle_job_seeker_registration_at(session_id, phone_number, text, cur, conn,
         
         # Save to database
         cur.execute("""
-            UPDATE users SET full_name = %s, skills = %s, location = %s 
-            WHERE phone_number = %s
-        """, (data['full_name'], data['skills'], data['location'], phone_number))
+            INSERT INTO users (phone_number, full_name, skills, location) 
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (phone_number) DO UPDATE SET
+            full_name = EXCLUDED.full_name,
+            skills = EXCLUDED.skills,
+            location = EXCLUDED.location
+        """, (phone_number, data['full_name'], data['skills'], data['location']))
         
         conn.commit()
         
         update_session(cur, conn, session_id, 'job_seeker_dashboard', {})
         return job_seeker_dashboard_at(session_id, phone_number, cur)
+    
+    return "CON Registration failed. Please try again."
 
 def handle_employer_registration_at(session_id, phone_number, text, cur, conn, data):
     step = data.get('step', 1)
@@ -341,6 +371,8 @@ def handle_employer_registration_at(session_id, phone_number, text, cur, conn, d
         
         update_session(cur, conn, session_id, 'employer_dashboard', {})
         return employer_dashboard_at(session_id, phone_number, cur)
+    
+    return "CON Registration failed. Please try again."
 
 def handle_job_seeker_dashboard_at(session_id, phone_number, text, cur, conn, data):
     if text == '1':
@@ -426,7 +458,11 @@ def handle_browse_jobs_at(session_id, phone_number, text, cur, conn, data):
                 job_id, job_title = jobs[choice-1]
                 
                 cur.execute("SELECT id FROM users WHERE phone_number = %s", (phone_number,))
-                user_id = cur.fetchone()[0]
+                user_result = cur.fetchone()
+                if not user_result:
+                    return "END User not found. Please register first."
+                
+                user_id = user_result[0]
                 
                 cur.execute("""
                     SELECT id FROM applications 
@@ -492,6 +528,29 @@ def show_my_applications_at(session_id, phone_number, cur, page):
     
     return response_text
 
+def handle_view_applications_at(session_id, phone_number, text, cur, conn, data):
+    page = data.get('page', 0)
+    
+    if text == '6':
+        page += 1
+        data['page'] = page
+        update_session(cur, conn, session_id, 'view_applications', data)
+        return show_my_applications_at(session_id, phone_number, cur, page)
+    
+    elif text == '7':
+        if page > 0:
+            page -= 1
+        data['page'] = page
+        update_session(cur, conn, session_id, 'view_applications', data)
+        return show_my_applications_at(session_id, phone_number, cur, page)
+    
+    elif text == '0':
+        update_session(cur, conn, session_id, 'main_menu', {})
+        return "CON Welcome to JOWA - Find Work in Zambia\n\n1. Looking for Work\n2. Post a Job\n3. About Jowa\n4. Contact Support\n\nReply with 1, 2, 3, or 4"
+    
+    else:
+        return "CON Invalid option. Please try again."
+
 def handle_post_job_at(session_id, phone_number, text, cur, conn, data):
     step = data.get('step', 1)
     
@@ -532,7 +591,11 @@ def handle_post_job_at(session_id, phone_number, text, cur, conn, data):
         data['payment_type'] = payment_type
         
         cur.execute("SELECT id FROM employers WHERE phone_number = %s", (phone_number,))
-        employer_id = cur.fetchone()[0]
+        employer_result = cur.fetchone()
+        if not employer_result:
+            return "END Employer not found. Please register first."
+        
+        employer_id = employer_result[0]
         
         cur.execute("""
             INSERT INTO jobs (employer_id, title, description, location, payment_amount, payment_type)
@@ -544,6 +607,8 @@ def handle_post_job_at(session_id, phone_number, text, cur, conn, data):
         
         update_session(cur, conn, session_id, 'employer_dashboard', {})
         return "END Job posted successfully!\n\nJob seekers can now apply for your position."
+    
+    return "CON Job posting failed. Please try again."
 
 def show_employer_jobs_at(session_id, phone_number, cur):
     cur.execute("""
@@ -598,23 +663,6 @@ def show_job_applications_at(session_id, phone_number, cur):
     response_text += "Contact applicants via their phone numbers above."
     return response_text
 
-# SMS Notification Function
-def send_sms_notification(phone_number, message):
-    """
-    Send SMS notifications to users
-    """
-    try:
-        if 'sms' in globals():
-            response = sms.send(message, [phone_number])
-            print(f"SMS sent to {phone_number}: {response}")
-            return True
-        else:
-            print(f"SMS simulation to {phone_number}: {message}")
-            return True
-    except Exception as e:
-        print(f"SMS sending failed: {e}")
-        return False
-
 def welcome_menu(session_id, phone_number):
     welcome_text = """Welcome to JOWA - Find Work in Zambia
 
@@ -630,24 +678,28 @@ Reply with 1, 2, 3, or 4"""
     if conn:
         cur = conn.cursor()
         
-        # Check if user exists
-        cur.execute("SELECT phone_number FROM users WHERE phone_number = %s", (phone_number,))
-        user_exists = cur.fetchone()
-        
-        if not user_exists:
-            cur.execute("INSERT INTO users (phone_number) VALUES (%s) ON CONFLICT DO NOTHING", (phone_number,))
-        
-        # Initialize session
-        cur.execute("""
-            INSERT INTO ussd_sessions (session_id, phone_number, menu_level, data) 
-            VALUES (%s, %s, 'main_menu', '{}')
-            ON CONFLICT (session_id) DO UPDATE SET 
-            menu_level = 'main_menu', updated_at = CURRENT_TIMESTAMP
-        """, (session_id, phone_number))
-        
-        conn.commit()
-        cur.close()
-        conn.close()
+        try:
+            # Check if user exists
+            cur.execute("SELECT phone_number FROM users WHERE phone_number = %s", (phone_number,))
+            user_exists = cur.fetchone()
+            
+            if not user_exists:
+                cur.execute("INSERT INTO users (phone_number) VALUES (%s) ON CONFLICT DO NOTHING", (phone_number,))
+            
+            # Initialize session
+            cur.execute("""
+                INSERT INTO ussd_sessions (session_id, phone_number, menu_level, data) 
+                VALUES (%s, %s, 'main_menu', '{}')
+                ON CONFLICT (session_id) DO UPDATE SET 
+                menu_level = 'main_menu', updated_at = CURRENT_TIMESTAMP
+            """, (session_id, phone_number))
+            
+            conn.commit()
+        except Exception as e:
+            print(f"Error in welcome_menu: {e}")
+        finally:
+            cur.close()
+            conn.close()
     
     return jsonify(ussd_response(welcome_text, session_id))
 
@@ -658,39 +710,45 @@ def process_input(session_id, phone_number, text):
     
     cur = conn.cursor()
     
-    # Get current session state
-    cur.execute("SELECT menu_level, data FROM ussd_sessions WHERE session_id = %s", (session_id,))
-    session_data = cur.fetchone()
-    
-    if not session_data:
-        return ussd_response("Session expired. Please dial again.", session_id, False)
-    
-    menu_level, data_json = session_data
-    data = json.loads(data_json) if data_json else {}
-    
-    # Route based on current menu level
-    if menu_level == 'main_menu':
-        response = handle_main_menu(session_id, phone_number, text, cur, conn)
-    elif menu_level == 'job_seeker_registration':
-        response = handle_job_seeker_registration(session_id, phone_number, text, cur, conn, data)
-    elif menu_level == 'employer_registration':
-        response = handle_employer_registration(session_id, phone_number, text, cur, conn, data)
-    elif menu_level == 'job_seeker_dashboard':
-        response = handle_job_seeker_dashboard(session_id, phone_number, text, cur, conn, data)
-    elif menu_level == 'employer_dashboard':
-        response = handle_employer_dashboard(session_id, phone_number, text, cur, conn, data)
-    elif menu_level == 'post_job':
-        response = handle_post_job(session_id, phone_number, text, cur, conn, data)
-    elif menu_level == 'browse_jobs':
-        response = handle_browse_jobs(session_id, phone_number, text, cur, conn, data)
-    elif menu_level == 'view_applications':
-        response = handle_view_applications(session_id, phone_number, text, cur, conn, data)
-    else:
-        response = ussd_response("Invalid option. Please dial again.", session_id, False)
-    
-    cur.close()
-    conn.close()
-    return response
+    try:
+        # Get current session state
+        cur.execute("SELECT menu_level, data FROM ussd_sessions WHERE session_id = %s", (session_id,))
+        session_data = cur.fetchone()
+        
+        if not session_data:
+            return ussd_response("Session expired. Please dial again.", session_id, False)
+        
+        menu_level, data_json = session_data
+        data = json.loads(data_json) if data_json else {}
+        
+        # Route based on current menu level
+        if menu_level == 'main_menu':
+            response = handle_main_menu(session_id, phone_number, text, cur, conn)
+        elif menu_level == 'job_seeker_registration':
+            response = handle_job_seeker_registration(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'employer_registration':
+            response = handle_employer_registration(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'job_seeker_dashboard':
+            response = handle_job_seeker_dashboard(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'employer_dashboard':
+            response = handle_employer_dashboard(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'post_job':
+            response = handle_post_job(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'browse_jobs':
+            response = handle_browse_jobs(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'view_applications':
+            response = handle_view_applications(session_id, phone_number, text, cur, conn, data)
+        else:
+            response = ussd_response("Invalid option. Please dial again.", session_id, False)
+        
+        return response
+        
+    except Exception as e:
+        print(f"Error in process_input: {e}")
+        return ussd_response("Sorry, an error occurred. Please try again.", session_id, False)
+    finally:
+        cur.close()
+        conn.close()
 
 def handle_main_menu(session_id, phone_number, text, cur, conn):
     if text == '1':
@@ -760,14 +818,20 @@ def handle_job_seeker_registration(session_id, phone_number, text, cur, conn, da
         
         # Save to database
         cur.execute("""
-            UPDATE users SET full_name = %s, skills = %s, location = %s 
-            WHERE phone_number = %s
-        """, (data['full_name'], data['skills'], data['location'], phone_number))
+            INSERT INTO users (phone_number, full_name, skills, location) 
+            VALUES (%s, %s, %s, %s)
+            ON CONFLICT (phone_number) DO UPDATE SET
+            full_name = EXCLUDED.full_name,
+            skills = EXCLUDED.skills,
+            location = EXCLUDED.location
+        """, (phone_number, data['full_name'], data['skills'], data['location']))
         
         conn.commit()
         
         update_session(cur, conn, session_id, 'job_seeker_dashboard', {})
         return job_seeker_dashboard(session_id, phone_number, cur)
+    
+    return ussd_response("Registration failed. Please try again.", session_id)
 
 def job_seeker_dashboard(session_id, phone_number, cur):
     # Get user info
@@ -802,7 +866,7 @@ def handle_job_seeker_dashboard(session_id, phone_number, text, cur, conn, data)
     
     elif text == '4':
         update_session(cur, conn, session_id, 'main_menu', {})
-        return welcome_menu(session_id, phone_number)
+        return handle_main_menu(session_id, phone_number, '', cur, conn)
     
     else:
         return ussd_response("Invalid option. Please try again.", session_id)
@@ -853,7 +917,11 @@ def handle_browse_jobs(session_id, phone_number, text, cur, conn, data):
                 job_id, job_title = jobs[choice-1]
                 
                 cur.execute("SELECT id FROM users WHERE phone_number = %s", (phone_number,))
-                user_id = cur.fetchone()[0]
+                user_result = cur.fetchone()
+                if not user_result:
+                    return ussd_response("User not found. Please register first.", session_id, False)
+                
+                user_id = user_result[0]
                 
                 cur.execute("""
                     SELECT id FROM applications 
@@ -884,7 +952,7 @@ def handle_browse_jobs(session_id, phone_number, text, cur, conn, data):
         
         elif choice == 0:
             update_session(cur, conn, session_id, 'main_menu', {})
-            return welcome_menu(session_id, phone_number)
+            return handle_main_menu(session_id, phone_number, '', cur, conn)
     
     return ussd_response("Invalid option. Please try again.", session_id)
 
@@ -929,14 +997,15 @@ def handle_view_applications(session_id, phone_number, text, cur, conn, data):
         return show_my_applications(session_id, phone_number, cur, page)
     
     elif text == '7':
-        page = max(0, page - 1)
+        if page > 0:
+            page -= 1
         data['page'] = page
         update_session(cur, conn, session_id, 'view_applications', data)
         return show_my_applications(session_id, phone_number, cur, page)
     
     elif text == '0':
         update_session(cur, conn, session_id, 'main_menu', {})
-        return welcome_menu(session_id, phone_number)
+        return handle_main_menu(session_id, phone_number, '', cur, conn)
     
     else:
         return ussd_response("Invalid option. Please try again.", session_id)
@@ -974,8 +1043,11 @@ def handle_employer_registration(session_id, phone_number, text, cur, conn, data
         
         update_session(cur, conn, session_id, 'employer_dashboard', {})
         return employer_dashboard(session_id, phone_number, cur)
+    
+    return ussd_response("Registration failed. Please try again.", session_id)
 
 def employer_dashboard(session_id, phone_number, cur):
+    # Get employer info
     cur.execute("SELECT company_name FROM employers WHERE phone_number = %s", (phone_number,))
     employer = cur.fetchone()
     
@@ -1005,7 +1077,7 @@ def handle_employer_dashboard(session_id, phone_number, text, cur, conn, data):
     
     elif text == '4':
         update_session(cur, conn, session_id, 'main_menu', {})
-        return welcome_menu(session_id, phone_number)
+        return handle_main_menu(session_id, phone_number, '', cur, conn)
     
     else:
         return ussd_response("Invalid option. Please try again.", session_id)
@@ -1050,7 +1122,11 @@ def handle_post_job(session_id, phone_number, text, cur, conn, data):
         data['payment_type'] = payment_type
         
         cur.execute("SELECT id FROM employers WHERE phone_number = %s", (phone_number,))
-        employer_id = cur.fetchone()[0]
+        employer_result = cur.fetchone()
+        if not employer_result:
+            return ussd_response("Employer not found. Please register first.", session_id, False)
+        
+        employer_id = employer_result[0]
         
         cur.execute("""
             INSERT INTO jobs (employer_id, title, description, location, payment_amount, payment_type)
@@ -1062,6 +1138,8 @@ def handle_post_job(session_id, phone_number, text, cur, conn, data):
         
         update_session(cur, conn, session_id, 'employer_dashboard', {})
         return ussd_response("Job posted successfully!\n\nJob seekers can now apply for your position.", session_id, False)
+    
+    return ussd_response("Job posting failed. Please try again.", session_id)
 
 def show_employer_jobs(session_id, phone_number, cur):
     cur.execute("""
@@ -1116,22 +1194,33 @@ def show_job_applications(session_id, phone_number, cur):
     response_text += "Contact applicants via their phone numbers above."
     return ussd_response(response_text, session_id, False)
 
-def update_session(cur, conn, session_id, menu_level, data):
-    cur.execute("""
-        UPDATE ussd_sessions 
-        SET menu_level = %s, data = %s, updated_at = CURRENT_TIMESTAMP
-        WHERE session_id = %s
-    """, (menu_level, json.dumps(data), session_id))
-    conn.commit()
-
 # Health check endpoint
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({
-        "status": "healthy",
-        "timestamp": datetime.now().isoformat(),
-        "environment": APP_ENV
-    })
+    try:
+        conn = get_db_connection()
+        if conn:
+            conn.close()
+            return jsonify({
+                "status": "healthy",
+                "database": "connected",
+                "timestamp": datetime.now().isoformat(),
+                "environment": APP_ENV
+            }), 200
+        else:
+            return jsonify({
+                "status": "unhealthy",
+                "database": "disconnected",
+                "timestamp": datetime.now().isoformat(),
+                "environment": APP_ENV
+            }), 503
+    except Exception as e:
+        return jsonify({
+            "status": "error",
+            "message": str(e),
+            "timestamp": datetime.now().isoformat(),
+            "environment": APP_ENV
+        }), 500
 
 # Home route
 @app.route('/')
@@ -1143,11 +1232,97 @@ def home():
         "timestamp": datetime.now().isoformat()
     })
 
+# Initialize database tables
+def initialize_database():
+    conn = get_db_connection()
+    if conn:
+        cur = conn.cursor()
+        
+        try:
+            # Create users table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    id SERIAL PRIMARY KEY,
+                    phone_number VARCHAR(20) UNIQUE NOT NULL,
+                    full_name VARCHAR(100),
+                    skills TEXT,
+                    location VARCHAR(100),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create employers table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS employers (
+                    id SERIAL PRIMARY KEY,
+                    phone_number VARCHAR(20) UNIQUE NOT NULL,
+                    company_name VARCHAR(100),
+                    business_type VARCHAR(100),
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create jobs table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS jobs (
+                    id SERIAL PRIMARY KEY,
+                    employer_id INTEGER REFERENCES employers(id),
+                    title VARCHAR(100) NOT NULL,
+                    description TEXT,
+                    location VARCHAR(100),
+                    payment_amount DECIMAL(10,2),
+                    payment_type VARCHAR(20),
+                    status VARCHAR(20) DEFAULT 'active',
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create applications table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS applications (
+                    id SERIAL PRIMARY KEY,
+                    job_id INTEGER REFERENCES jobs(id),
+                    user_id INTEGER REFERENCES users(id),
+                    status VARCHAR(20) DEFAULT 'pending',
+                    applied_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(job_id, user_id)
+                )
+            """)
+            
+            # Create USSD sessions table
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS ussd_sessions (
+                    session_id VARCHAR(100) PRIMARY KEY,
+                    phone_number VARCHAR(20) NOT NULL,
+                    menu_level VARCHAR(50),
+                    data JSONB,
+                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.commit()
+            print("Database tables initialized successfully")
+        except Exception as e:
+            print(f"Error initializing database: {e}")
+        finally:
+            cur.close()
+            conn.close()
+
 if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    debug = DEBUG
-    app.run(host='0.0.0.0', port=port, debug=debug)
-    if __name__ == '__main__':
-    port = int(os.environ.get('PORT', 5000))
-    debug = os.environ.get('DEBUG', 'False').lower() == 'true'
+    # Initialize database tables
+    initialize_database()
+    
+    # Run the application
+    port = int(os.getenv('PORT', 5000))
+    debug = os.getenv('DEBUG', 'True').lower() == 'true'
+    
+    print(f"Starting JOWA USSD Application on port {port}")
+    print(f"Debug mode: {debug}")
+    print(f"Environment: {APP_ENV}")
+    print(f"USSD Code: {USSD_CODE}")
+    
     app.run(host='0.0.0.0', port=port, debug=debug)
