@@ -14,6 +14,15 @@ def init_render():
         print("📦 Installing dependencies...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
         
+        # Debug: Check environment variables
+        database_url = os.getenv('DATABASE_URL')
+        print(f"🔍 DATABASE_URL in render_init: {bool(database_url)}")
+        if database_url and '//' in database_url:
+            url_parts = database_url.split('//')
+            if len(url_parts) > 1:
+                host_part = url_parts[1].split('@')[-1].split('/')[0]
+                print(f"🔍 Database host in render_init: {host_part}")
+        
         # Import and initialize database from app.py
         print("🔄 Initializing database...")
         

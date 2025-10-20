@@ -49,13 +49,20 @@ def get_db_connection():
         print(f"🔍 APP_ENV: {APP_ENV}")
         
         if database_url:
+            # Debug: Show first part of URL (without credentials)
+            if '//' in database_url:
+                url_parts = database_url.split('//')
+                if len(url_parts) > 1:
+                    host_part = url_parts[1].split('@')[-1].split('/')[0]
+                    print(f"🔍 Connecting to database host: {host_part}")
+            
             # For Render PostgreSQL - fix the URL format if needed
             if database_url.startswith('postgres://'):
                 database_url = database_url.replace('postgres://', 'postgresql://', 1)
                 print("🔧 Fixed URL format from postgres:// to postgresql://")
             
             print("🔗 Connecting to Render PostgreSQL database...")
-            # Use the DATABASE_URL directly - Render handles SSL automatically
+            # Use the DATABASE_URL directly
             conn = psycopg2.connect(database_url)
             print("✅ Render PostgreSQL connection successful!")
             
