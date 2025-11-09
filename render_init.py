@@ -14,30 +14,12 @@ def init_render():
         print("📦 Installing dependencies...")
         subprocess.check_call([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"])
         
-        # Debug: Check environment variables
-        database_url = os.getenv('DATABASE_URL')
-        print(f"🔍 DATABASE_URL in render_init: {bool(database_url)}")
-        if database_url and '//' in database_url:
-            url_parts = database_url.split('//')
-            if len(url_parts) > 1:
-                host_part = url_parts[1].split('@')[-1].split('/')[0]
-                print(f"🔍 Database host in render_init: {host_part}")
-        
-        # Import and initialize database from app.py
+        # Initialize database using simple method
         print("🔄 Initializing database...")
+        subprocess.check_call([sys.executable, "init_db.py"])
         
-        # Add current directory to Python path
-        sys.path.append(os.path.dirname(os.path.abspath(__file__)))
-        
-        from app import initialize_database
-        success = initialize_database()
-        
-        if success:
-            print("✅ Render initialization complete!")
-            return True
-        else:
-            print("⚠️ Database initialization had issues, but continuing deployment...")
-            return True  # Still return True to allow deployment
+        print("✅ Render initialization complete!")
+        return True
             
     except Exception as e:
         print(f"❌ Initialization failed: {e}")

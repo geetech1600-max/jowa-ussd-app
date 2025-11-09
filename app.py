@@ -19,6 +19,14 @@ USSD_CODE = os.getenv('USSD_CODE', '*384*531#')
 COUNTRY_CODE = os.getenv('COUNTRY_CODE', 'ZM')
 APP_URL = os.getenv('APP_URL', 'http://localhost:5000')
 
+# Payment configuration
+PAYMENT_CONFIG = {
+    'mobile_money_providers': ['mtn', 'airtel', 'zamtel'],
+    'default_currency': 'ZMW',
+    'transaction_timeout': 300,  # 5 minutes
+    'max_retries': 3
+}
+
 # Initialize Africa's Talking
 def initialize_africas_talking():
     try:
@@ -86,7 +94,7 @@ def get_db_connection():
         print(f"🔍 Detailed error: {traceback.format_exc()}")
         return None
 
-# Initialize database tables - FIXED VERSION
+# Initialize database tables - ENHANCED VERSION WITH PAYMENTS
 def initialize_database():
     print("🔄 Starting database initialization...")
     
@@ -170,6 +178,48 @@ def initialize_database():
         """)
         print("✅ Created ussd_sessions table")
         
+        # =========================================================================
+        # PAYMENT TABLES - ADD THESE NEW TABLES
+        # =========================================================================
+        
+        # Create payments table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                id SERIAL PRIMARY KEY,
+                session_id VARCHAR(100),
+                phone_number VARCHAR(20) NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                currency VARCHAR(10) DEFAULT 'ZMW',
+                payment_method VARCHAR(50),
+                provider VARCHAR(50),
+                transaction_id VARCHAR(100),
+                status VARCHAR(20) DEFAULT 'pending',
+                purpose VARCHAR(100),
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✅ Created payments table")
+        
+        # Create payment_sessions table for USSD payment flows
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS payment_sessions (
+                session_id VARCHAR(100) PRIMARY KEY,
+                phone_number VARCHAR(20) NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                currency VARCHAR(10) DEFAULT 'ZMW',
+                payment_method VARCHAR(50),
+                provider VARCHAR(50),
+                purpose VARCHAR(100),
+                data JSONB,
+                status VARCHAR(20) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✅ Created payment_sessions table")
+        
         conn.commit()
         print("🎉 Database tables initialized successfully!")
         return True
@@ -229,7 +279,473 @@ def send_sms_notification(phone_number, message):
     except Exception as e:
         print(f"SMS sending failed: {e}")
         return False
+# Payment configuration
+PAYMENT_CONFIG = {
+    'mobile_money_providers': ['mtn', 'airtel', 'zamtel'],
+    'default_currency': 'ZMW',
+    'transaction_timeout': 300,  # 5 minutes
+    'max_retries': 3
+}
 
+# Payment sessions table initialization (add to initialize_database function)
+def initialize_payment_tables():
+    """
+    Add payment-related tables to database initialization
+    Call this from your existing initialize_database() function
+    """
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    cur = conn.cursor()
+    
+    try:
+        # Create payments table
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS payments (
+                id SERIAL PRIMARY KEY,
+                session_id VARCHAR(100),
+                phone_number VARCHAR(20) NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                currency VARCHAR(10) DEFAULT 'ZMW',
+                payment_method VARCHAR(50),
+                provider VARCHAR(50),
+                transaction_id VARCHAR(100),
+                status VARCHAR(20) DEFAULT 'pending',
+                purpose VARCHAR(100),
+                description TEXT,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✅ Created payments table")
+        
+        # Create payment_sessions table for USSD payment flows
+        cur.execute("""
+            CREATE TABLE IF NOT EXISTS payment_sessions (
+                session_id VARCHAR(100) PRIMARY KEY,
+                phone_number VARCHAR(20) NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                currency VARCHAR(10) DEFAULT 'ZMW',
+                payment_method VARCHAR(50),
+                provider VARCHAR(50),
+                purpose VARCHAR(100),
+                data JSONB,
+                status VARCHAR(20) DEFAULT 'pending',
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        print("✅ Created payment_sessions table")
+        
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        print(f"❌ Error initializing payment tables: {e}")
+        conn.rollback()
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+# Payment processing functions
+def initiate_payment(session_id, phone_number, amount, purpose, description=""):
+    """
+    Initiate a payment transaction
+    """
+    conn = get_db_connection()
+    if not conn:
+        return False, "Database connection failed"
+    
+    cur = conn.cursor()
+    
+    try:
+        # Create payment record
+        cur.execute("""
+            INSERT INTO payments (session_id, phone_number, amount, purpose, description, status)
+            VALUES (%s, %s, %s, %s, %s, 'initiated')
+            RETURNING id
+        """, (session_id, phone_number, amount, purpose, description))
+        
+        payment_id = cur.fetchone()[0]
+        conn.commit()
+        
+        print(f"💰 Payment initiated: ID {payment_id}, Amount: {amount}, Purpose: {purpose}")
+        return True, payment_id
+        
+    except Exception as e:
+        print(f"❌ Payment initiation failed: {e}")
+        conn.rollback()
+        return False, str(e)
+    finally:
+        cur.close()
+        conn.close()
+
+def process_mobile_money_payment(phone_number, amount, provider, purpose="JOWA Service"):
+    """
+    Process mobile money payment (simulation - integrate with actual payment gateway)
+    """
+    try:
+        # Simulate payment processing
+        print(f"🔗 Processing {provider} mobile money payment...")
+        print(f"📱 Phone: {phone_number}, Amount: {amount}, Purpose: {purpose}")
+        
+        # Simulate API call to payment gateway
+        # In production, integrate with actual payment APIs like:
+        # - MTN Mobile Money API
+        # - Airtel Money API  
+        # - Zamtel Kwacha API
+        
+        # For now, simulate successful payment 80% of the time
+        import random
+        success = random.random() > 0.2
+        
+        if success:
+            transaction_id = f"TXN{random.randint(100000, 999999)}"
+            print(f"✅ Payment successful: {transaction_id}")
+            return True, transaction_id, "Payment completed successfully"
+        else:
+            print("❌ Payment failed: Simulated failure")
+            return False, None, "Payment failed. Please try again."
+            
+    except Exception as e:
+        print(f"❌ Payment processing error: {e}")
+        return False, None, str(e)
+
+def verify_payment(transaction_id):
+    """
+    Verify payment status
+    """
+    conn = get_db_connection()
+    if not conn:
+        return False, "Database connection failed"
+    
+    cur = conn.cursor()
+    
+    try:
+        cur.execute("""
+            SELECT status, amount, phone_number, purpose 
+            FROM payments 
+            WHERE transaction_id = %s
+        """, (transaction_id,))
+        
+        result = cur.fetchone()
+        if result:
+            status, amount, phone_number, purpose = result
+            return True, {
+                'status': status,
+                'amount': amount,
+                'phone_number': phone_number,
+                'purpose': purpose
+            }
+        else:
+            return False, "Transaction not found"
+            
+    except Exception as e:
+        return False, str(e)
+    finally:
+        cur.close()
+        conn.close()
+
+def update_payment_status(transaction_id, status, provider=None):
+    """
+    Update payment status
+    """
+    conn = get_db_connection()
+    if not conn:
+        return False
+    
+    cur = conn.cursor()
+    
+    try:
+        if provider:
+            cur.execute("""
+                UPDATE payments 
+                SET status = %s, provider = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE transaction_id = %s
+            """, (status, provider, transaction_id))
+        else:
+            cur.execute("""
+                UPDATE payments 
+                SET status = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE transaction_id = %s
+            """, (status, transaction_id))
+        
+        conn.commit()
+        return True
+        
+    except Exception as e:
+        print(f"❌ Payment status update failed: {e}")
+        conn.rollback()
+        return False
+    finally:
+        cur.close()
+        conn.close()
+
+# USSD Payment Menu Functions
+def payment_menu_at(session_id, phone_number, amount, purpose):
+    """
+    Africa's Talking formatted payment menu
+    """
+    return f"""CON Payment Required: K{amount}
+
+Purpose: {purpose}
+
+Select payment method:
+1. MTN Mobile Money
+2. Airtel Money  
+3. Zamtel Kwacha
+4. Cancel Payment
+
+Reply with 1, 2, 3, or 4"""
+
+def handle_payment_selection_at(session_id, phone_number, text, amount, purpose, cur, conn):
+    """
+    Handle payment method selection
+    """
+    providers = {
+        '1': 'mtn',
+        '2': 'airtel', 
+        '3': 'zamtel'
+    }
+    
+    if text in providers:
+        provider = providers[text]
+        
+        # Initiate payment
+        success, payment_id = initiate_payment(session_id, phone_number, amount, purpose)
+        
+        if success:
+            # Store payment session
+            cur.execute("""
+                INSERT INTO payment_sessions (session_id, phone_number, amount, provider, purpose, status)
+                VALUES (%s, %s, %s, %s, %s, 'pending')
+                ON CONFLICT (session_id) DO UPDATE SET
+                phone_number = EXCLUDED.phone_number,
+                amount = EXCLUDED.amount,
+                provider = EXCLUDED.provider,
+                purpose = EXCLUDED.purpose,
+                status = 'pending',
+                updated_at = CURRENT_TIMESTAMP
+            """, (session_id, phone_number, amount, provider, purpose))
+            conn.commit()
+            
+            return f"CON Confirm {provider.upper()} Payment:\n\nAmount: K{amount}\nPhone: {phone_number}\nPurpose: {purpose}\n\n1. Confirm Payment\n2. Cancel\n\nReply 1 or 2"
+        else:
+            return "END Payment initiation failed. Please try again later."
+    
+    elif text == '4':
+        return "END Payment cancelled. Thank you for using JOWA."
+    
+    else:
+        return "CON Invalid option. Please select payment method:\n1. MTN Mobile Money\n2. Airtel Money\n3. Zamtel Kwacha\n4. Cancel"
+
+def process_payment_confirmation_at(session_id, phone_number, text, cur, conn):
+    """
+    Process payment confirmation
+    """
+    if text == '1':
+        # Get payment details
+        cur.execute("""
+            SELECT amount, provider, purpose 
+            FROM payment_sessions 
+            WHERE session_id = %s AND status = 'pending'
+        """, (session_id,))
+        
+        result = cur.fetchone()
+        if not result:
+            return "END Payment session expired. Please start over."
+        
+        amount, provider, purpose = result
+        
+        # Process payment
+        success, transaction_id, message = process_mobile_money_payment(
+            phone_number, amount, provider, purpose
+        )
+        
+        if success:
+            # Update payment session
+            cur.execute("""
+                UPDATE payment_sessions 
+                SET status = 'completed', updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = %s
+            """, (session_id,))
+            
+            # Update payments table
+            cur.execute("""
+                UPDATE payments 
+                SET status = 'completed', transaction_id = %s, provider = %s, updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = %s AND status = 'initiated'
+            """, (transaction_id, provider, session_id))
+            
+            conn.commit()
+            
+            # Send confirmation SMS
+            send_sms_notification(phone_number, 
+                f"Payment of K{amount} for {purpose} completed successfully. Transaction ID: {transaction_id}. Thank you for using JOWA!")
+            
+            return f"END Payment successful! 🎉\n\nAmount: K{amount}\nTransaction ID: {transaction_id}\n\nThank you for your payment!"
+        
+        else:
+            # Update payment session as failed
+            cur.execute("""
+                UPDATE payment_sessions 
+                SET status = 'failed', updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = %s
+            """, (session_id,))
+            
+            cur.execute("""
+                UPDATE payments 
+                SET status = 'failed', updated_at = CURRENT_TIMESTAMP
+                WHERE session_id = %s AND status = 'initiated'
+            """, (session_id,))
+            
+            conn.commit()
+            
+            return f"END Payment failed. {message}\n\nPlease try again or contact support."
+    
+    elif text == '2':
+        # Cancel payment
+        cur.execute("""
+            UPDATE payment_sessions 
+            SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+            WHERE session_id = %s
+        """, (session_id,))
+        
+        cur.execute("""
+            UPDATE payments 
+            SET status = 'cancelled', updated_at = CURRENT_TIMESTAMP
+            WHERE session_id = %s AND status = 'initiated'
+        """, (session_id,))
+        
+        conn.commit()
+        
+        return "END Payment cancelled. Thank you for using JOWA."
+    
+    else:
+        return "CON Invalid option. Please reply:\n1. Confirm Payment\n2. Cancel"
+
+# Premium Job Posting with Payment
+def premium_job_posting_flow_at(session_id, phone_number, cur, conn):
+    """
+    Premium job posting with payment requirement
+    """
+    premium_amount = 10.00  # K10 for premium job posting
+    
+    # Check if employer exists
+    cur.execute("SELECT company_name FROM employers WHERE phone_number = %s", (phone_number,))
+    employer = cur.fetchone()
+    
+    if not employer:
+        return "END Employer registration required. Please register first from main menu."
+    
+    # Store premium job session
+    cur.execute("""
+        INSERT INTO payment_sessions (session_id, phone_number, amount, purpose, status)
+        VALUES (%s, %s, %s, 'Premium Job Posting', 'premium_job')
+        ON CONFLICT (session_id) DO UPDATE SET
+        phone_number = EXCLUDED.phone_number,
+        amount = EXCLUDED.amount,
+        purpose = EXCLUDED.purpose,
+        status = 'premium_job',
+        updated_at = CURRENT_TIMESTAMP
+    """, (session_id, phone_number, premium_amount))
+    conn.commit()
+    
+    return payment_menu_at(session_id, phone_number, premium_amount, "Premium Job Posting")
+
+# Payment History and Management
+def payment_history_at(session_id, phone_number, cur, page=0):
+    """
+    Show payment history
+    """
+    offset = page * 5
+    cur.execute("""
+        SELECT purpose, amount, status, created_at, transaction_id
+        FROM payments 
+        WHERE phone_number = %s 
+        ORDER BY created_at DESC 
+        LIMIT 5 OFFSET %s
+    """, (phone_number, offset))
+    
+    payments = cur.fetchall()
+    
+    if not payments:
+        return "END No payment history found."
+    
+    response_text = "CON Your Payment History:\n\n"
+    for i, payment in enumerate(payments, 1):
+        purpose, amount, status, created_at, transaction_id = payment
+        status_icon = "✅" if status == 'completed' else "⏳" if status == 'pending' else "❌"
+        date_str = created_at.strftime('%d/%m/%y')
+        
+        response_text += f"{i}. {purpose}\n"
+        response_text += f"   K{amount} {status_icon} {date_str}\n"
+        if transaction_id:
+            response_text += f"   ID: {transaction_id[:8]}...\n"
+        response_text += "\n"
+    
+    response_text += "6. Next Page\n7. Previous Page\n0. Main Menu"
+    
+    return response_text
+
+# Admin Payment Functions (for support)
+def get_total_revenue(cur):
+    """
+    Get total revenue (admin function)
+    """
+    cur.execute("""
+        SELECT COALESCE(SUM(amount), 0) as total_revenue
+        FROM payments 
+        WHERE status = 'completed'
+    """)
+    result = cur.fetchone()
+    return result[0] if result else 0
+
+def get_daily_transactions(cur):
+    """
+    Get daily transaction stats (admin function)
+    """
+    cur.execute("""
+        SELECT COUNT(*) as count, COALESCE(SUM(amount), 0) as amount
+        FROM payments 
+        WHERE status = 'completed' AND DATE(created_at) = CURRENT_DATE
+    """)
+    return cur.fetchone()
+
+# Payment Webhook Endpoint (for payment gateway callbacks)
+@app.route('/payment-webhook', methods=['POST'])
+def payment_webhook():
+    """
+    Webhook endpoint for payment gateway callbacks
+    """
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({"error": "No data received"}), 400
+        
+        # Extract payment details from webhook
+        transaction_id = data.get('transactionId')
+        status = data.get('status')
+        amount = data.get('amount')
+        phone_number = data.get('phoneNumber')
+        
+        print(f"🔔 Payment webhook received: {transaction_id}, {status}")
+        
+        # Update payment status
+        if transaction_id and status:
+            success = update_payment_status(transaction_id, status)
+            if success:
+                return jsonify({"status": "success"}), 200
+            else:
+                return jsonify({"status": "update_failed"}), 500
+        else:
+            return jsonify({"error": "Missing transaction data"}), 400
+            
+    except Exception as e:
+        print(f"❌ Payment webhook error: {e}")
+        return jsonify({"error": str(e)}), 500
 # Main USSD Handler
 @app.route('/ussd', methods=['POST'])
 def ussd_handler():
@@ -271,33 +787,30 @@ def africas_talking_ussd():
     try:
         # Get data from Africa's Talking
         session_id = request.values.get("sessionId")
-        phone_number = request.values.get("phoneNumber")
+        phone_number = request.values.get("phoneNumber") 
         text = request.values.get("text", "")
-        network_code = request.values.get("networkCode")
+        
+        print(f"📞 Africa's Talking USSD: {session_id}, {phone_number}, '{text}'")
         
         if not session_id or not phone_number:
             return "END Invalid request. Missing sessionId or phoneNumber."
             
-        print(f"Africa's Talking USSD: {session_id}, {phone_number}, {text}")
+        # Process using simple function
+        response = process_africas_talking_ussd(session_id, phone_number, text)
         
-        # Process the USSD request
-        if text == "":
-            # First menu - welcome screen
-            response = "CON Welcome to JOWA - Find Work in Zambia\n\n1. Looking for Work\n2. Post a Job\n3. About Jowa\n4. Contact Support\n\nReply with 1, 2, 3, or 4"
-        else:
-            # Process user input
-            response = process_africas_talking_ussd(session_id, phone_number, text)
-        
+        print(f"✅ Response: {response}")
         return response
         
     except Exception as e:
-        print(f"Africa's Talking USSD error: {e}")
+        print(f"❌ Africa's Talking USSD error: {e}")
         return "END Sorry, service temporarily unavailable. Please try again later."
 
 def process_africas_talking_ussd(session_id, phone_number, text):
     """
     Process USSD input and return Africa's Talking formatted response
     """
+    conn = None
+    cur = None
     try:
         conn = get_db_connection()
         if not conn:
@@ -310,7 +823,7 @@ def process_africas_talking_ussd(session_id, phone_number, text):
         session_data = cur.fetchone()
         
         if not session_data:
-            # New session
+            # New session - this shouldn't happen but handle it
             cur.execute("""
                 INSERT INTO ussd_sessions (session_id, phone_number, menu_level, data) 
                 VALUES (%s, %s, 'main_menu', '{}')
@@ -322,38 +835,51 @@ def process_africas_talking_ussd(session_id, phone_number, text):
             menu_level, data_json = session_data
             data = json.loads(data_json) if data_json else {}
         
+        print(f"🔍 USSD Processing: menu_level={menu_level}, text='{text}', phone={phone_number}")
+        
         # Process based on current menu level
+        response_text = "CON Welcome to JOWA - Find Work in Zambia\n\n1. Looking for Work\n2. Post a Job\n3. Payment History\n4. About Jowa\n5. Contact Support\n\nReply with 1, 2, 3, 4, or 5"
+        
         if menu_level == 'main_menu':
             if text == '1':
                 # Job seeker path
-                cur.execute("SELECT full_name FROM users WHERE phone_number = %s", (phone_number,))
-                user = cur.fetchone()
-                
-                if user and user[0]:
-                    update_session(cur, conn, session_id, 'job_seeker_dashboard', {})
-                    response_text = job_seeker_dashboard_at(session_id, phone_number, cur)
-                else:
-                    update_session(cur, conn, session_id, 'job_seeker_registration', {'step': 1})
-                    response_text = "CON Welcome! Let's set up your profile.\n\nEnter your full name:"
+                try:
+                    cur.execute("SELECT full_name FROM users WHERE phone_number = %s", (phone_number,))
+                    user = cur.fetchone()
+                    
+                    if user and user[0]:
+                        update_session(cur, conn, session_id, 'job_seeker_dashboard', {})
+                        response_text = job_seeker_dashboard_at(session_id, phone_number, cur)
+                    else:
+                        update_session(cur, conn, session_id, 'job_seeker_registration', {'step': 1})
+                        response_text = "CON Welcome! Let's set up your profile.\n\nEnter your full name:"
+                except Exception as e:
+                    print(f"Error in job seeker path: {e}")
+                    response_text = "END Service error. Please try again later."
+                    
             elif text == '2':
                 # Employer path
-                cur.execute("SELECT company_name FROM employers WHERE phone_number = %s", (phone_number,))
-                employer = cur.fetchone()
-                
-                if employer and employer[0]:
-                    update_session(cur, conn, session_id, 'employer_dashboard', {})
-                    response_text = employer_dashboard_at(session_id, phone_number, cur)
-                else:
-                    update_session(cur, conn, session_id, 'employer_registration', {'step': 1})
-                    response_text = "CON Welcome Employer! Let's register your business.\n\nEnter your company name:"
+                try:
+                    cur.execute("SELECT company_name FROM employers WHERE phone_number = %s", (phone_number,))
+                    employer = cur.fetchone()
+                    
+                    if employer and employer[0]:
+                        update_session(cur, conn, session_id, 'employer_dashboard', {})
+                        response_text = employer_dashboard_at(session_id, phone_number, cur)
+                    else:
+                        update_session(cur, conn, session_id, 'employer_registration', {'step': 1})
+                        response_text = "CON Welcome Employer! Let's register your business.\n\nEnter your company name:"
+                except Exception as e:
+                    print(f"Error in employer path: {e}")
+                    response_text = "END Service error. Please try again later."
+                    
             elif text == '3':
-                about_text = """END About JOWA\n\nConnecting job seekers with employers across Zambia. No internet needed!\n\nFind daily work opportunities\nPost jobs for free\nSimple USSD interface\nTrusted by Zambians\n\nFor support: +260960000000"""
-                response_text = about_text
+                update_session(cur, conn, session_id, 'payment_menu', {})
+                response_text = "CON Payment Services\n\n1. View Payment History\n2. Premium Job Posting (K10)\n3. Back to Main Menu\n\nReply with 1, 2, or 3"
             elif text == '4':
-                support_text = """END Contact Support:\n\nCall: +260960000000\nEmail: support@jowa.co.zm\n\nOur team is here to help you with any issues using Jowa.\n\nThank you for using Jowa!"""
-                response_text = support_text
-            else:
-                response_text = "CON Invalid option. Please reply with 1, 2, 3, or 4\n\n1. Looking for Work\n2. Post a Job\n3. About Jowa\n4. Contact Support"
+                response_text = "END About JOWA\n\nConnecting job seekers with employers across Zambia. No internet needed!\n\nFind daily work opportunities\nPost jobs for free\nSimple USSD interface\n\nFor support: +260570528201"
+            elif text == '5':
+                response_text = "END Contact Support:\n\nCall: +260570528201\nEmail: support@jowa.co.zm\n\nOur team is here to help you with any issues.\n\nThank you for using Jowa!"
         
         elif menu_level == 'job_seeker_registration':
             response_text = handle_job_seeker_registration_at(session_id, phone_number, text, cur, conn, data)
@@ -366,27 +892,52 @@ def process_africas_talking_ussd(session_id, phone_number, text):
         
         elif menu_level == 'employer_dashboard':
             response_text = handle_employer_dashboard_at(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'payment_menu':
+            if text == '1':
+                update_session(cur, conn, session_id, 'payment_history', {'page': 0})
+                response_text = payment_history_at(session_id, phone_number, cur, 0)
+            elif text == '2':
+                response_text = premium_job_posting_flow_at(session_id, phone_number, cur, conn)
+            else:
+                response_text = "CON Invalid option. Please try again."
         
-        elif menu_level == 'post_job':
-            response_text = handle_post_job_at(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'payment_method':
+            response_text = handle_payment_selection_at(session_id, phone_number, text, data['amount'], data['purpose'], cur, conn)
         
-        elif menu_level == 'browse_jobs':
-            response_text = handle_browse_jobs_at(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'payment_confirmation':
+            response_text = process_payment_confirmation_at(session_id, phone_number, text, cur, conn)
         
-        elif menu_level == 'view_applications':
-            response_text = handle_view_applications_at(session_id, phone_number, text, cur, conn, data)
+        elif menu_level == 'payment_history':
+            if text == '6':
+                page = data.get('page', 0) + 1
+                data['page'] = page
+                update_session(cur, conn, session_id, 'payment_history', data)
+                response_text = payment_history_at(session_id, phone_number, cur, page)
+            elif text == '7':
+                page = max(0, data.get('page', 0) - 1)
+                data['page'] = page
+                update_session(cur, conn, session_id, 'payment_history', data)
+                response_text = payment_history_at(session_id, phone_number, cur, page)
+            elif text == '0':
+                update_session(cur, conn, session_id, 'main_menu', {})
+                response_text = "CON Welcome to JOWA - Find Work in Zambia\n\n1. Looking for Work\n2. Post a Job\n3. Payment History\n4. About Jowa\n5. Contact Support\n\nReply with 1, 2, 3, 4, or 5"
+            else:
+                response_text = "CON Invalid option. Please try again."
         
-        else:
-            response_text = "END Invalid option. Please dial the USSD code again to start."
-        
-        cur.close()
-        conn.close()
-        
+        print(f"✅ USSD Response: {response_text[:100]}...")
         return response_text
         
     except Exception as e:
-        print(f"Africa's Talking processing error: {e}")
-        return "END Sorry, an error occurred. Please try again."
+        print(f"❌ Africa's Talking processing error: {e}")
+        import traceback
+        print(f"🔍 Full error: {traceback.format_exc()}")
+        return "END Sorry, service temporarily unavailable. Please try again later."
+    finally:
+        if cur:
+            cur.close()
+        if conn:
+            conn.close()
+
 
 # Africa's Talking formatted menu functions
 def job_seeker_dashboard_at(session_id, phone_number, cur):
@@ -1301,6 +1852,41 @@ def show_job_applications(session_id, phone_number, cur):
     response_text += "Contact applicants via their phone numbers above."
     return ussd_response(response_text, session_id, False)
 
+
+# Payment Status Check Endpoint
+@app.route('/payment-status/<transaction_id>', methods=['GET'])
+def payment_status(transaction_id):
+    """
+    Check payment status via API
+    """
+    success, result = verify_payment(transaction_id)
+    
+    if success:
+        return jsonify({
+            "status": "success",
+            "payment": result
+        }), 200
+    else:
+        return jsonify({
+            "status": "error",
+            "message": result
+        }), 404
+
+# Test Payment Endpoint
+@app.route('/test-payment', methods=['GET'])
+def test_payment():
+    """
+    Test payment endpoint
+    """
+    return jsonify({
+        "message": "Payment system is working",
+        "endpoints": {
+            "payment_webhook": "/payment-webhook",
+            "payment_status": "/payment-status/<transaction_id>"
+        },
+        "timestamp": datetime.now().isoformat()
+    })
+
 # Health check endpoint
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -1356,11 +1942,19 @@ if __name__ == '__main__':
     
     # Run the application
     port = int(os.getenv('PORT', 5000))
-    debug = os.getenv('DEBUG', 'True').lower() == 'true'
+   
     
-    print(f"🌐 Starting server on port {port}")
-    print(f"🔧 Debug mode: {debug}")
+    print(f"🌐 Starting server on 0.0.0.0:{port}")
+    print(f"🔧 Debug mode: {DEBUG}")
     print(f"🏭 Environment: {APP_ENV}")
     print(f"📞 USSD Code: {USSD_CODE}")
     
-    app.run(host='0.0.0.0', port=port, debug=debug)
+    app.run(host='0.0.0.0', port=port, debug=DEBUG, use_reloader=False)
+    # For Render deployment
+if __name__ == '__main__':
+    port = int(os.environ.get("PORT", 5000))
+    app.run(host='0.0.0.0', port=port, debug=DEBUG, use_reloader=False)
+@app.route('/test-ussd', methods=['GET', 'POST'])
+def test_ussd():
+    """Test endpoint to verify USSD is working"""
+    return "CON Test successful! JOWA USSD is working.\n\n1. Option 1\n2. Option 2\n3. Option 3"    
